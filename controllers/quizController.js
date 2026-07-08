@@ -138,6 +138,58 @@ const getStudentQuizResults = async (req, res) => {
   }
 };
 
+// @desc    Modifier un quiz (Enseignant uniquement, doit être propriétaire du cours)
+// @route   PUT /api/quizzes/:id
+// @access  Private/Teacher
+const updateQuiz = async (req, res) => {
+  try {
+    const { title, questions } = req.body;
+    const quiz = await Quiz.findById(req.params.id).populate('course', 'teacher');
+
+    if (!quiz) {
+      return res.status(404).json({ message: 'Quiz non trouvé' });
+    }
+
+    if (quiz.course.teacher.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Non autorisé' });
+    }
+
+    if (title !== undefined) quiz.title = title;
+    if (questions !== undefined) quiz.questions = questions;
+
+    await quiz.save();
+    res.json(quiz);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Supprimer un quiz (Enseignant uniquement, doit être propriétaire du cours)
+// @route   DELETE /api/quizzes/:id
+// @access  Private/Teacher
+const deleteQuiz = async (req, res) => {
+  try {
+    const quiz = await Quiz.findById(req.params.id).populate('course', 'teacher');
+
+    if (!quiz) {
+      return res.status(404).json({ message: 'Quiz non trouvé' });
+    }
+
+    if (quiz.course.teacher.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Non autorisé' });
+    }
+
+    // On supprime aussi les résultats liés à ce quiz, sinon ils restent
+    // orphelins en base et pourraient fausser d'éventuelles statistiques.
+    await QuizResult.deleteMany({ quiz: quiz._id });
+    await quiz.deleteOne();
+
+    res.json({ message: 'Quiz supprimé avec succès' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   createQuiz,
   getQuizzesByCourse,
@@ -145,4 +197,6 @@ module.exports = {
   submitQuizResponse,
   getTeacherQuizResults,
   getStudentQuizResults,
+  updateQuiz,
+  deleteQuiz,
 };

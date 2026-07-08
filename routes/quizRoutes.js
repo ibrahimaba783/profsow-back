@@ -7,6 +7,8 @@ const {
   submitQuizResponse,
   getTeacherQuizResults,
   getStudentQuizResults,
+  updateQuiz,
+  deleteQuiz,
 } = require('../controllers/quizController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
@@ -23,7 +25,9 @@ router.route('/student/results')
   .get(protect, getStudentQuizResults);
 
 router.route('/:id')
-  .get(protect, getQuizById);
+  .get(protect, getQuizById)
+  .put(protect, authorize('teacher'), updateQuiz)
+  .delete(protect, authorize('teacher'), deleteQuiz);
 
 router.route('/:id/submit')
   .post(protect, submitQuizResponse);
