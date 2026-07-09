@@ -62,19 +62,12 @@ const userSchema = new mongoose.Schema(
 );
 
 // Crypter le mot de passe avant de sauvegarder
-userSchema.pre('save', async function (next) {
-  // BUGFIX : le "return" est indispensable ici. Sans lui, même quand le mot
-  // de passe n'est pas modifié (ex: on sauvegarde juste après avoir changé
-  // la bio ou les matières), l'exécution continuait quand même vers le
-  // hashage plus bas et re-hashait un mot de passe déjà hashé (ou undefined
-  // si le champ n'était pas chargé), rendant le compte impossible à
-  // reconnecter sans que rien ne le signale.
+userSchema.pre('save', async function () {
   if (!this.isModified('password')) {
-    return next();
+    return;
   }
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
-  next();
 });
 
 // Comparer les mots de passe
