@@ -293,6 +293,7 @@ const resetPassword = async (req, res) => {
 
     res.status(200).json({ message: 'Mot de passe réinitialisé avec succès' });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: error.message });
   }
 };
