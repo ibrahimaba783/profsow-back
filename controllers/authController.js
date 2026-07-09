@@ -93,6 +93,7 @@ const registerUser = async (req, res) => {
       res.status(400).json({ message: 'Données utilisateur invalides' });
     }
   } catch (error) {
+    console.error('ERREUR REGISTER :', error);
     res.status(500).json({ message: error.message });
   }
 };
