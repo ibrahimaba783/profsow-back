@@ -21,6 +21,7 @@ const app = express();
 app.use(cors({
   origin: [
     "http://localhost:5173",
+    "http://localhost:5174",
     "https://profsow-front.vercel.app"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
@@ -36,6 +37,7 @@ app.use('/api/courses', require('./routes/courseRoutes'));
 app.use('/api/subscriptions', require('./routes/subscriptionRoutes'));
 app.use('/api/quizzes', require('./routes/quizRoutes'));
 app.use('/api/discussions', require('./routes/discussionRoutes'));
+app.use('/api/stats', require('./routes/statsRoutes'));
 
 // Route de test
 app.get('/', (req, res) => {
