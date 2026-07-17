@@ -55,8 +55,10 @@ const getCourseById = async (req, res) => {
       return res.json(course);
     }
 
-    // Accès restreint : on renvoie uniquement les infos publiques (catalogue),
-    // sans le contenu pédagogique (chapters/lessons/pdfPath/youtubeUrl/meetLink...).
+    // Accès restreint : on renvoie les infos publiques (catalogue) ainsi que le sommaire
+    // (titres des chapitres/leçons) pour donner un aperçu du contenu, à la manière d'une
+    // page de vente de cours — mais SANS le contenu pédagogique réel (pdfPath/youtubeUrl/
+    // meetLink/content), qui reste réservé aux personnes abonnées.
     const publicCourse = {
       _id: course._id,
       title: course.title,
@@ -68,6 +70,15 @@ const getCourseById = async (req, res) => {
       teacher: course.teacher,
       chaptersCount: course.chapters?.length || 0,
       lessonsCount: course.chapters?.reduce((acc, c) => acc + (c.lessons?.length || 0), 0) || 0,
+      chapters: (course.chapters || []).map((chapter) => ({
+        _id: chapter._id,
+        title: chapter.title,
+        lessons: (chapter.lessons || []).map((lesson) => ({
+          _id: lesson._id,
+          title: lesson.title,
+          contentType: lesson.contentType,
+        })),
+      })),
     };
 
     res.json(publicCourse);
