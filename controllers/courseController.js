@@ -66,6 +66,8 @@ const getCourseById = async (req, res) => {
       subject: course.subject,
       level: course.level,
       price: course.price,
+      isFree: course.isFree,
+      originalPrice: course.originalPrice,
       image: course.image,
       teacher: course.teacher,
       chaptersCount: course.chapters?.length || 0,
@@ -92,14 +94,20 @@ const getCourseById = async (req, res) => {
 // @access  Private/Teacher
 const createCourse = async (req, res) => {
   try {
-    const { title, description, subject, level, price } = req.body;
+    const { title, description, subject, level, price, isFree, originalPrice } = req.body;
+    const courseIsFree = isFree === true || isFree === 'true';
 
     const courseData = {
       title,
       description,
       subject,
       level,
-      price: price ? parseFloat(price) : 6000,
+      // Un cours gratuit (offre promotionnelle) a toujours un prix de 0 FCFA,
+      // quelle que soit la valeur envoyée dans le champ prix.
+      price: courseIsFree ? 0 : (price ? parseFloat(price) : 6000),
+      isFree: courseIsFree,
+      // Valeur normale affichée barrée sur les cartes quand le cours est en promo gratuite
+      originalPrice: originalPrice ? parseFloat(originalPrice) : 6000,
       teacher: req.user._id,
     };
 
@@ -135,7 +143,14 @@ const updateCourse = async (req, res) => {
     course.description = req.body.description || course.description;
     course.subject = req.body.subject || course.subject;
     course.level = req.body.level || course.level;
-    if (req.body.price !== undefined) course.price = parseFloat(req.body.price);
+
+    if (req.body.isFree !== undefined) {
+      course.isFree = req.body.isFree === true || req.body.isFree === 'true';
+      course.price = course.isFree ? 0 : (req.body.price !== undefined ? parseFloat(req.body.price) : course.price);
+    } else if (req.body.price !== undefined) {
+      course.price = parseFloat(req.body.price);
+    }
+    if (req.body.originalPrice !== undefined) course.originalPrice = parseFloat(req.body.originalPrice);
 
     if (req.file) {
       // Supprimer l'ancienne image de Cloudinary si elle existe

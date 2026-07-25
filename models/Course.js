@@ -64,6 +64,14 @@ const courseSchema = new mongoose.Schema(
       type: Number,
       default: 6000, // 6000 FCFA
     },
+    isFree: {
+      type: Boolean,
+      default: false, // true = module offert gratuitement (offre promotionnelle)
+    },
+    originalPrice: {
+      type: Number,
+      default: 6000, // Valeur normale affichée barrée quand le cours est en promotion gratuite
+    },
     teacher: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

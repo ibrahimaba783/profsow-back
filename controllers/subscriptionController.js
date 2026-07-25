@@ -96,6 +96,69 @@ const createSubscription = async (req, res) => {
   }
 };
 
+// @desc    S'inscrire instantanément à un cours gratuit (offre promotionnelle), sans paiement
+// @route   POST /api/subscriptions/enroll-free/:courseId
+// @access  Private/Student
+const enrollFreeCourse = async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.courseId);
+    if (!course) {
+      return res.status(404).json({ message: 'Cours non trouvé' });
+    }
+
+    // Filet de sécurité : un cours à 0 FCFA est traité comme gratuit même si la case
+    // "Cours gratuit" n'a pas été explicitement cochée à sa création.
+    const courseIsFree = course.isFree || course.price === 0;
+    if (!courseIsFree) {
+      return res.status(400).json({ message: "Ce cours n'est pas proposé gratuitement" });
+    }
+
+    const existingSub = await Subscription.findOne({
+      student: req.user._id,
+      course: course._id,
+      status: 'active',
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (existingSub) {
+      return res.status(400).json({ message: 'Vous avez déjà accès à ce cours' });
+    }
+
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + 12); // Même durée d'accès qu'un abonnement payant : 1 an
+
+    const subscription = await Subscription.create({
+      student: req.user._id,
+      course: course._id,
+      paymentMethod: 'Gratuit (Promotion)',
+      transactionId: `FREE-${Date.now()}`,
+      amount: 0,
+      expiresAt,
+      status: 'active',
+    });
+
+    // E-mail de confirmation (best-effort, ne bloque pas la réponse en cas d'échec)
+    try {
+      const subject = `Accès activé - Cours gratuit : ${course.title}`;
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #6366f1; border-radius: 10px; background-color: #ffffff;">
+          <h2 style="color: #6366f1; text-align: center;">Accès activé !</h2>
+          <p>Bonjour <strong>${req.user.name}</strong>,</p>
+          <p>Vous avez maintenant accès gratuitement au cours <strong>${course.title}</strong> (${course.subject} - ${course.level}).</p>
+          <p>Profitez-en pour explorer tous les chapitres, vidéos et documents disponibles.</p>
+        </div>
+      `;
+      await sendEmail({ email: req.user.email, subject, html });
+    } catch (err) {
+      console.error("Erreur d'envoi d'e-mail d'inscription gratuite :", err);
+    }
+
+    res.status(201).json({ subscription });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // @desc    Obtenir les abonnements de l'étudiant connecté
 // @route   GET /api/subscriptions/my
 // @access  Private
@@ -150,6 +213,7 @@ const getTeacherStudents = async (req, res) => {
 
 module.exports = {
   createSubscription,
+  enrollFreeCourse,
   getMySubscriptions,
   checkSubscriptionStatus,
   getTeacherStudents,
