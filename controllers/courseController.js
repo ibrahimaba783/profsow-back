@@ -65,6 +65,7 @@ const getCourseById = async (req, res) => {
       description: course.description,
       subject: course.subject,
       level: course.level,
+      duration: course.duration,
       price: course.price,
       isFree: course.isFree,
       originalPrice: course.originalPrice,
@@ -94,7 +95,7 @@ const getCourseById = async (req, res) => {
 // @access  Private/Teacher
 const createCourse = async (req, res) => {
   try {
-    const { title, description, subject, level, price, isFree, originalPrice } = req.body;
+    const { title, description, subject, level, duration, price, isFree, originalPrice } = req.body;
     const courseIsFree = isFree === true || isFree === 'true';
 
     const courseData = {
@@ -102,6 +103,7 @@ const createCourse = async (req, res) => {
       description,
       subject,
       level,
+      duration: duration || '3 mois',
       // Un cours gratuit (offre promotionnelle) a toujours un prix de 0 FCFA,
       // quelle que soit la valeur envoyée dans le champ prix.
       price: courseIsFree ? 0 : (price ? parseFloat(price) : 6000),
@@ -143,6 +145,7 @@ const updateCourse = async (req, res) => {
     course.description = req.body.description || course.description;
     course.subject = req.body.subject || course.subject;
     course.level = req.body.level || course.level;
+    course.duration = req.body.duration || course.duration;
 
     if (req.body.isFree !== undefined) {
       course.isFree = req.body.isFree === true || req.body.isFree === 'true';

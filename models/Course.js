@@ -60,6 +60,11 @@ const courseSchema = new mongoose.Schema(
       required: [true, 'Veuillez spécifier le niveau'],
       enum: ['4ème', '3ème', '2nde S', '1ère S', 'TS'],
     },
+    // Durée affichée sur les cartes de cours (ex: "3 mois", "10h", "1 an")
+    duration: {
+      type: String,
+      default: '3 mois',
+    },
     price: {
       type: Number,
       default: 6000, // 6000 FCFA
