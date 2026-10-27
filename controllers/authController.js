@@ -2,6 +2,9 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const sendEmail = require('../utils/sendEmail');
+const { OAuth2Client } = require('google-auth-library');
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Générer le Token JWT
 const generateToken = (id) => {
@@ -299,9 +302,65 @@ const resetPassword = async (req, res) => {
   }
 };
 
+// @desc    Inscription / connexion avec Google
+// @route   POST /api/auth/google
+// @access  Public
+const googleAuth = async (req, res) => {
+  try {
+    const { credential } = req.body;
+
+    if (!credential) {
+      return res.status(400).json({ message: 'Jeton Google manquant' });
+    }
+
+    // Vérification du jeton côté serveur : on ne fait jamais confiance
+    // à l'email envoyé directement par le frontend.
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const { email, name, picture, email_verified } = ticket.getPayload();
+
+    if (!email || !email_verified) {
+      return res.status(400).json({ message: 'Email Google non vérifié' });
+    }
+
+    let user = await User.findOne({ email });
+
+    if (!user) {
+      // SÉCURITÉ : comme pour l'inscription classique, le rôle est forcé
+      // à "student". Mot de passe aléatoire (inutilisable) car la
+      // connexion se fait via Google.
+      user = await User.create({
+        name: name || email.split('@')[0],
+        email,
+        password: crypto.randomBytes(32).toString('hex'),
+        role: 'student',
+        ...(picture ? { avatar: picture } : {}),
+      });
+    }
+
+    res.json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      avatar: user.avatar,
+      bio: user.bio,
+      subjects: user.subjects,
+      levels: user.levels,
+      token: generateToken(user._id),
+    });
+  } catch (error) {
+    console.error('ERREUR GOOGLE AUTH :', error.message);
+    res.status(401).json({ message: 'Connexion Google invalide' });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
+  googleAuth,
   getUserProfile,
   updateUserProfile,
   forgotPassword,
