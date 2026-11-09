@@ -7,7 +7,8 @@ const lessonSchema = new mongoose.Schema({
   },
   contentType: {
     type: String,
-    enum: ['video', 'pdf', 'meet', 'text'],
+    // 'jitsi' = salle de classe en direct intégrée (utilisée par CourseDetail.jsx)
+    enum: ['video', 'pdf', 'meet', 'jitsi', 'text'],
     required: [true, 'Veuillez choisir le type de contenu'],
   },
   youtubeUrl: {
