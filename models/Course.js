@@ -6,9 +6,9 @@ const lessonSchema = new mongoose.Schema({
     required: [true, 'Veuillez ajouter un titre à la leçon'],
   },
   contentType: {
+    type: String,
     // 'jitsi' = salle de classe en direct intégrée (utilisée par CourseDetail.jsx)
     enum: ['video', 'pdf', 'meet', 'jitsi', 'text'],
-    type: String,
     required: [true, 'Veuillez choisir le type de contenu'],
   },
   youtubeUrl: {
@@ -78,21 +78,10 @@ const courseSchema = new mongoose.Schema(
       type: Number,
       default: 6000, // Valeur normale affichée barrée quand le cours est en promotion gratuite
     },
-    // Relation module <-> professeur assigné
     teacher: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
-    },
-    // Statut actif/inactif géré par l'administrateur
-    isActive: {
-      type: Boolean,
-      default: true,
-    },
-    // Ordre d'affichage des modules (réordonnancement admin)
-    order: {
-      type: Number,
-      default: 0,
     },
     image: {
       type: String,

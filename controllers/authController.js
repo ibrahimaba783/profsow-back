@@ -13,54 +13,73 @@ const generateToken = (id) => {
   });
 };
 
-// @desc    Créer un compte utilisateur (Étudiant public)
+// @desc    Créer un compte utilisateur (Étudiant ou Enseignant)
 // @route   POST /api/auth/register
 // @access  Public
 const registerUser = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: 'Veuillez remplir tous les champs obligatoires' });
-    }
-
-    const normalizedEmail = email.trim().toLowerCase();
-    const userExists = await User.findOne({ email: normalizedEmail });
+    const userExists = await User.findOne({ email });
 
     if (userExists) {
-      return res.status(400).json({ message: 'Cet email est déjà associé à un compte' });
+      return res.status(400).json({ message: 'Cet utilisateur existe déjà' });
     }
 
-    // Le rôle est forcé à 'student' pour toute inscription publique
+    // SÉCURITÉ : l'inscription publique ne crée JAMAIS de compte enseignant,
+    // quelle que soit la valeur envoyée par le client. Le rôle est forcé
+    // côté serveur pour empêcher qu'une requête API directe (Postman, etc.)
+    // ne s'auto-attribue le rôle "teacher". Le compte professeur (unique,
+    // M. Aliou Sow) est créé séparément via le script scripts/createTeacher.js.
     const user = await User.create({
-      name: name.trim(),
-      email: normalizedEmail,
+      name,
+      email,
       password,
       role: 'student',
     });
 
     if (user) {
-      const frontendUrl = process.env.FRONTEND_URL || 'https://profsow-front.vercel.app';
+      // Envoyer un e-mail de bienvenue
       const subject = 'Bienvenue sur la plateforme e-learning de M. Aliou Sow !';
+      const roleText = user.role === 'teacher' ? 'Enseignant' : 'Étudiant';
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
       const html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #00897b; border-radius: 10px; background-color: #fcfcfc;">
-          <h2 style="color: #00897b; text-align: center; border-bottom: 2px solid #00897b; padding-bottom: 10px;">Bienvenue sur Aliou Sow Academy !</h2>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #4F46E5; border-radius: 10px; background-color: #fcfcfc;">
+          <h2 style="color: #4F46E5; text-align: center; border-bottom: 2px solid #4F46E5; padding-bottom: 10px;">Bienvenue sur Profsow !</h2>
           <p>Bonjour <strong>${user.name}</strong>,</p>
-          <p>Nous sommes ravis de vous accueillir sur notre plateforme éducative dédiée aux Mathématiques et à la Physique-Chimie.</p>
+          <p>Nous sommes ravis de vous accueillir en tant qu'<strong>${roleText}</strong> sur notre plateforme éducative dédiée aux matières scientifiques (Mathématiques, Physique-Chimie).</p>
+          <p>Grâce à cette plateforme, vous pouvez :</p>
+          <ul>
+            ${user.role === 'teacher' 
+              ? '<li>Créer et structurer des cours par chapitres et leçons.</li><li>Ajouter des vidéos YouTube, des documents PDF et des cours en direct (Google Meet).</li><li>Créer des évaluations interactives et suivre le progrès de vos élèves.</li>'
+              : '<li>Accéder à des cours structurés de haute qualité.</li><li>Télécharger des supports de cours (PDF), regarder les leçons en vidéo et suivre les direct Meet.</li><li>Tester vos connaissances grâce à des exercices interactifs.</li>'
+            }
+          </ul>
           <p>Rappel de vos identifiants :</p>
           <table style="width: 100%; background-color: #f3f4f6; border-radius: 5px; padding: 10px; margin: 15px 0;">
             <tr><td><strong>Email :</strong></td><td>${user.email}</td></tr>
-            <tr><td><strong>Rôle :</strong></td><td>Étudiant</td></tr>
+            <tr><td><strong>Rôle :</strong></td><td>${roleText}</td></tr>
           </table>
+          <p>Pour commencer à utiliser la plateforme, connectez-vous dès à présent à votre espace :</p>
           <div style="text-align: center; margin: 25px 0;">
-            <a href="${frontendUrl}/login" style="background-color: #ff9800; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Accéder à mon espace</a>
+            <a href="${frontendUrl}/login" style="background-color: #4F46E5; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Accéder à mon espace</a>
           </div>
+          <hr style="border: 0; border-top: 1px solid #e5e7eb;">
+          <p style="font-size: 11px; color: #6b7280; text-align: center;">Ce message a été envoyé automatiquement. Veuillez ne pas y répondre directement.</p>
         </div>
       `;
 
-      sendEmail({ email: user.email, subject, html }).catch((err) => {
-        console.error("Erreur d'envoi d'e-mail de bienvenue :", err.message);
-      });
+      let emailStatus = 'sent';
+      let previewUrl = '';
+      try {
+        const mailInfo = await sendEmail({ email: user.email, subject, html });
+        if (mailInfo && mailInfo.previewUrl) {
+          previewUrl = mailInfo.previewUrl;
+        }
+      } catch (err) {
+        console.error("Erreur d'envoi d'e-mail :", err);
+        emailStatus = 'failed';
+      }
 
       res.status(201).json({
         _id: user._id,
@@ -70,11 +89,14 @@ const registerUser = async (req, res) => {
         avatar: user.avatar,
         bio: user.bio,
         token: generateToken(user._id),
+        emailStatus,
+        emailPreviewUrl: previewUrl,
       });
     } else {
       res.status(400).json({ message: 'Données utilisateur invalides' });
     }
   } catch (error) {
+    console.error('ERREUR REGISTER :', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -86,12 +108,7 @@ const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Veuillez saisir votre email et votre mot de passe' });
-    }
-
-    const normalizedEmail = email.trim().toLowerCase();
-    const user = await User.findOne({ email: normalizedEmail }).select('+password');
+    const user = await User.findOne({ email }).select('+password');
 
     if (user && (await user.matchPassword(password))) {
       res.json({
@@ -132,7 +149,7 @@ const getUserProfile = async (req, res) => {
         levels: user.levels,
       });
     } else {
-      res.status(404).json({ message: 'Utilisateur introuvable' });
+      res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -148,21 +165,17 @@ const updateUserProfile = async (req, res) => {
 
     if (user) {
       user.name = req.body.name || user.name;
+      user.email = req.body.email || user.email;
       user.bio = req.body.bio !== undefined ? req.body.bio : user.bio;
-
-      if (req.body.subjects) {
-        user.subjects = Array.isArray(req.body.subjects)
-          ? req.body.subjects
-          : req.body.subjects.split(',').map((s) => s.trim());
-      }
-      if (req.body.levels) {
-        user.levels = Array.isArray(req.body.levels)
-          ? req.body.levels
-          : req.body.levels.split(',').map((l) => l.trim());
-      }
-
+      
+      // Si une nouvelle image a été envoyée
       if (req.file) {
-        user.avatar = req.file.path;
+        user.avatar = req.file.path; // URL Cloudinary renvoyée par le middleware
+      }
+
+      if (user.role === 'teacher') {
+        user.subjects = req.body.subjects ? JSON.parse(req.body.subjects) : user.subjects;
+        user.levels = req.body.levels ? JSON.parse(req.body.levels) : user.levels;
       }
 
       if (req.body.password) {
@@ -183,28 +196,29 @@ const updateUserProfile = async (req, res) => {
         token: generateToken(updatedUser._id),
       });
     } else {
-      res.status(404).json({ message: 'Utilisateur introuvable' });
+      res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Demander la réinitialisation du mot de passe
+// @desc    Demander un lien de réinitialisation de mot de passe
 // @route   POST /api/auth/forgot-password
 // @access  Public
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
+    const user = await User.findOne({ email });
+
+    // IMPORTANT : on renvoie toujours le même message, que l'email existe ou
+    // non en base. Ça évite qu'un visiteur puisse deviner quels emails sont
+    // inscrits sur la plateforme en testant ce formulaire (énumération de
+    // comptes).
     const genericResponse = {
-      message: 'Si un compte existe avec cette adresse email, un lien de réinitialisation vous a été envoyé.',
+      message: "Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé.",
     };
 
-    if (!email) {
-      return res.status(400).json({ message: 'Veuillez renseigner votre adresse e-mail' });
-    }
-
-    const user = await User.findOne({ email: email.trim().toLowerCase() });
     if (!user) {
       return res.status(200).json(genericResponse);
     }
@@ -212,17 +226,20 @@ const forgotPassword = async (req, res) => {
     const resetToken = user.getResetPasswordToken();
     await user.save({ validateBeforeSave: false });
 
-    const frontendUrl = process.env.FRONTEND_URL || 'https://profsow-front.vercel.app';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
     const resetUrl = `${frontendUrl}/reset-password/${resetToken}`;
 
     const html = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #00897b; border-radius: 10px; background-color: #fcfcfc;">
-        <h2 style="color: #00897b; text-align: center; border-bottom: 2px solid #00897b; padding-bottom: 10px;">Réinitialisation de votre mot de passe</h2>
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #4F46E5; border-radius: 10px; background-color: #fcfcfc;">
+        <h2 style="color: #4F46E5; text-align: center; border-bottom: 2px solid #4F46E5; padding-bottom: 10px;">Réinitialisation de mot de passe</h2>
         <p>Bonjour <strong>${user.name}</strong>,</p>
         <p>Vous avez demandé la réinitialisation de votre mot de passe sur Aliou Sow Academy. Cliquez sur le bouton ci-dessous pour choisir un nouveau mot de passe. Ce lien est valable <strong>30 minutes</strong>.</p>
         <div style="text-align: center; margin: 25px 0;">
-          <a href="${resetUrl}" style="background-color: #ff9800; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Réinitialiser mon mot de passe</a>
+          <a href="${resetUrl}" style="background-color: #4F46E5; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Réinitialiser mon mot de passe</a>
         </div>
+        <p style="font-size: 12px; color: #6b7280;">Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet e-mail sans risque : votre mot de passe actuel reste inchangé.</p>
+        <hr style="border: 0; border-top: 1px solid #e5e7eb;">
+        <p style="font-size: 11px; color: #6b7280; text-align: center;">Ce message a été envoyé automatiquement. Veuillez ne pas y répondre directement.</p>
       </div>
     `;
 
@@ -233,6 +250,9 @@ const forgotPassword = async (req, res) => {
         html,
       });
     } catch (err) {
+      console.error("Erreur d'envoi de l'e-mail de réinitialisation :", err);
+      // On annule le jeton généré si l'email n'a pas pu partir, pour éviter
+      // un jeton valide "orphelin" que personne n'a reçu.
       user.resetPasswordToken = undefined;
       user.resetPasswordExpire = undefined;
       await user.save({ validateBeforeSave: false });
@@ -245,7 +265,7 @@ const forgotPassword = async (req, res) => {
   }
 };
 
-// @desc    Réinitialiser le mot de passe
+// @desc    Réinitialiser le mot de passe à partir du jeton reçu par e-mail
 // @route   PUT /api/auth/reset-password/:token
 // @access  Public
 const resetPassword = async (req, res) => {
@@ -270,13 +290,14 @@ const resetPassword = async (req, res) => {
       return res.status(400).json({ message: 'Ce lien de réinitialisation est invalide ou a expiré' });
     }
 
-    user.password = password;
+    user.password = password; // re-hashé automatiquement par le hook pre('save')
     user.resetPasswordToken = undefined;
     user.resetPasswordExpire = undefined;
     await user.save();
 
     res.status(200).json({ message: 'Mot de passe réinitialisé avec succès' });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -292,6 +313,8 @@ const googleAuth = async (req, res) => {
       return res.status(400).json({ message: 'Jeton Google manquant' });
     }
 
+    // Vérification du jeton côté serveur : on ne fait jamais confiance
+    // à l'email envoyé directement par le frontend.
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
       audience: process.env.GOOGLE_CLIENT_ID,
@@ -305,6 +328,9 @@ const googleAuth = async (req, res) => {
     let user = await User.findOne({ email });
 
     if (!user) {
+      // SÉCURITÉ : comme pour l'inscription classique, le rôle est forcé
+      // à "student". Mot de passe aléatoire (inutilisable) car la
+      // connexion se fait via Google.
       user = await User.create({
         name: name || email.split('@')[0],
         email,
@@ -326,210 +352,8 @@ const googleAuth = async (req, res) => {
       token: generateToken(user._id),
     });
   } catch (error) {
+    console.error('ERREUR GOOGLE AUTH :', error.message);
     res.status(401).json({ message: 'Connexion Google invalide' });
-  }
-};
-
-// =========================================================================
-// GESTION DES UTILISATEURS RBAC (ADMIN SEULEMENT)
-// =========================================================================
-
-// @desc    Obtenir la liste de tous les utilisateurs (élèves, profs, admins)
-// @route   GET /api/auth/users
-// @access  Private/Admin
-const getAllUsers = async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({
-        message: 'Accès refusé. Seul un administrateur peut gérer les utilisateurs.',
-      });
-    }
-
-    const { role, q } = req.query;
-    const filter = {};
-
-    if (role && ['student', 'teacher', 'admin'].includes(role)) {
-      filter.role = role;
-    }
-
-    if (q && q.trim()) {
-      filter.$or = [
-        { name: { $regex: q.trim(), $options: 'i' } },
-        { email: { $regex: q.trim(), $options: 'i' } },
-      ];
-    }
-
-    const users = await User.find(filter)
-      .select('name email role avatar bio subjects levels createdAt')
-      .sort({ createdAt: -1 });
-
-    res.json(users);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// @desc    Créer un utilisateur par l'administrateur (élève, prof ou admin)
-// @route   POST /api/auth/users
-// @access  Private/Admin
-const createUserByAdmin = async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({
-        message: 'Accès refusé. Seul un administrateur peut créer des comptes avec rôle.',
-      });
-    }
-
-    const { name, email, password, role, subjects, levels, bio } = req.body;
-
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: 'Nom, email et mot de passe sont obligatoires' });
-    }
-
-    const normalizedEmail = email.trim().toLowerCase();
-    const existing = await User.findOne({ email: normalizedEmail });
-    if (existing) {
-      return res.status(400).json({ message: 'Cet email est déjà utilisé' });
-    }
-
-    const chosenRole = ['student', 'teacher', 'admin'].includes(role) ? role : 'student';
-
-    const newUser = await User.create({
-      name: name.trim(),
-      email: normalizedEmail,
-      password,
-      role: chosenRole,
-      bio: bio || '',
-      subjects: subjects || ['Mathématiques', 'Physique-Chimie'],
-      levels: levels || ['4ème', '3ème', '2nde S', '1ère S', 'TS'],
-    });
-
-    res.status(201).json({
-      _id: newUser._id,
-      name: newUser.name,
-      email: newUser.email,
-      role: newUser.role,
-      avatar: newUser.avatar,
-      bio: newUser.bio,
-      createdAt: newUser.createdAt,
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// @desc    Changer le rôle d'un utilisateur (ADMIN SEULEMENT)
-// @route   PUT /api/auth/users/:id/role
-// @access  Private/Admin
-const updateUserRole = async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({
-        message: 'Accès refusé. Seul un administrateur peut changer les rôles.',
-      });
-    }
-
-    const { role } = req.body;
-    if (!['student', 'teacher', 'admin'].includes(role)) {
-      return res.status(400).json({ message: 'Rôle invalide (valeurs possibles : student, teacher, admin)' });
-    }
-
-    const targetUser = await User.findById(req.params.id);
-    if (!targetUser) {
-      return res.status(404).json({ message: 'Utilisateur introuvable' });
-    }
-
-    // Sécurité : interdire à l'administrateur de rétrograder son propre compte
-    if (targetUser._id.toString() === req.user._id.toString() && role !== 'admin') {
-      return res.status(400).json({
-        message: 'Impossible de rétrograder votre propre compte administrateur.',
-      });
-    }
-
-    targetUser.role = role;
-    await targetUser.save({ validateBeforeSave: false });
-
-    res.json({
-      _id: targetUser._id,
-      name: targetUser.name,
-      email: targetUser.email,
-      role: targetUser.role,
-      message: `Rôle mis à jour avec succès : ${role}`,
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// @desc    Supprimer un utilisateur par l'administrateur
-// @route   DELETE /api/auth/users/:id
-// @access  Private/Admin
-const deleteUserByAdmin = async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({
-        message: 'Accès refusé. Seul un administrateur peut supprimer un compte.',
-      });
-    }
-
-    const targetUser = await User.findById(req.params.id);
-    if (!targetUser) {
-      return res.status(404).json({ message: 'Utilisateur introuvable' });
-    }
-
-    // Sécurité : interdire la suppression de son propre compte
-    if (targetUser._id.toString() === req.user._id.toString()) {
-      return res.status(400).json({ message: 'Vous ne pouvez pas supprimer votre propre compte.' });
-    }
-
-    await targetUser.deleteOne();
-    res.json({ message: 'Compte utilisateur supprimé avec succès' });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// @desc    Obtenir la liste des professeurs disponibles pour l'assignation de modules
-// @route   GET /api/auth/teachers
-// @access  Private (Admin / Teacher)
-const getTeachersList = async (req, res) => {
-  try {
-    const teachers = await User.find({ role: { $in: ['teacher', 'admin'] } })
-      .select('name email avatar bio role')
-      .sort({ name: 1 });
-
-    res.json(teachers);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// Anciennes routes de compatibilité
-const getAllStudents = async (req, res) => {
-  try {
-    const students = await User.find({ role: 'student' })
-      .select('name email avatar bio createdAt')
-      .sort({ createdAt: -1 });
-
-    res.json(students);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-const deleteStudent = async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Seul un administrateur peut supprimer un élève.' });
-    }
-    const student = await User.findById(req.params.id);
-    if (!student) return res.status(404).json({ message: 'Étudiant introuvable' });
-    if (student.role !== 'student') return res.status(403).json({ message: 'Ce compte n’est pas un élève.' });
-
-    await student.deleteOne();
-    res.json({ message: 'Étudiant supprimé avec succès' });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
   }
 };
 
@@ -541,11 +365,4 @@ module.exports = {
   updateUserProfile,
   forgotPassword,
   resetPassword,
-  getAllUsers,
-  createUserByAdmin,
-  updateUserRole,
-  deleteUserByAdmin,
-  getTeachersList,
-  getAllStudents,
-  deleteStudent,
 };

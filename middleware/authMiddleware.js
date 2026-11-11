@@ -34,7 +34,8 @@ const protect = async (req, res, next) => {
 // Version "douce" du middleware protect : ne bloque JAMAIS la requête.
 // Si un token valide est fourni, req.user est peuplé (comme protect).
 // Sinon (pas de token, token invalide, utilisateur supprimé), req.user reste undefined
-// et la requête continue normalement.
+// et la requête continue normalement. Utile pour les routes publiques qui doivent
+// quand même savoir "qui" fait la requête pour adapter la réponse (ex: getCourseById).
 const optionalAuth = async (req, res, next) => {
   let token;
 
@@ -55,14 +56,12 @@ const optionalAuth = async (req, res, next) => {
   next();
 };
 
-// Accorder l'accès à des rôles spécifiques (ex: authorize('admin'), authorize('admin', 'teacher'))
+// Accorder l'accès à des rôles spécifiques
 const authorize = (...roles) => {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
       return res.status(403).json({
-        message: `Accès refusé. Cette action nécessite le rôle : ${roles.join(' ou ')} (votre rôle : ${
-          req.user ? req.user.role : 'non défini'
-        })`,
+        message: `Accès refusé pour le rôle : ${req.user ? req.user.role : 'non défini'}`,
       });
     }
     next();
