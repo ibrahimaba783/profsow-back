@@ -6,19 +6,23 @@ const connectDB = require('./config/db');
 // Charger les variables d'environnement
 dotenv.config();
 
-// Connexion à la base de données MongoDB & Garantie du compte admin principal
+// Connexion à la base de données MongoDB & Vérification des rôles clés
 connectDB().then(async () => {
   try {
     const User = require('./models/User');
-    const updated = await User.updateOne(
-      { email: 'aliou@gmail.com' },
+    // Garantie que le compte administrateur ibah2536@gmail.com a le rôle 'admin'
+    await User.updateOne(
+      { email: 'ibah2536@gmail.com' },
       { $set: { role: 'admin' } }
     );
-    if (updated.modifiedCount > 0) {
-      console.log('✓ Rôle mis à niveau vers "admin" pour aliou@gmail.com');
-    }
+    // Garantie que le compte professeur aliou@gmail.com a le rôle 'teacher'
+    await User.updateOne(
+      { email: 'aliou@gmail.com' },
+      { $set: { role: 'teacher' } }
+    );
+    console.log('✓ Rôles synchronisés : ibah2536@gmail.com [admin], aliou@gmail.com [teacher]');
   } catch (err) {
-    console.error('Erreur migration rôle admin :', err.message);
+    console.error('Erreur synchronisation rôles :', err.message);
   }
 });
 

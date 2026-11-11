@@ -94,12 +94,6 @@ const loginUser = async (req, res) => {
     const user = await User.findOne({ email: normalizedEmail }).select('+password');
 
     if (user && (await user.matchPassword(password))) {
-      // Sécurité : garantir que le compte principal (aliou@gmail.com) reste admin
-      if (normalizedEmail === 'aliou@gmail.com' && user.role !== 'admin') {
-        user.role = 'admin';
-        await user.save({ validateBeforeSave: false });
-      }
-
       res.json({
         _id: user._id,
         name: user.name,
