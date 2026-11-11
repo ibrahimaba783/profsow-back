@@ -25,7 +25,7 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['student', 'teacher'],
+      enum: ['student', 'teacher', 'admin'],
       default: 'student',
     },
     avatar: {
@@ -36,7 +36,7 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
-    // Informations optionnelles pour le professeur Aliou Sow ou autres
+    // Informations optionnelles pour les enseignants
     subjects: {
       type: [String],
       default: ['Mathématiques', 'Physique-Chimie'],
@@ -76,9 +76,6 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
 };
 
 // Générer un jeton de réinitialisation de mot de passe (valable 30 minutes).
-// Retourne le jeton EN CLAIR (à envoyer par e-mail) tout en ne stockant en
-// base que son empreinte SHA-256, pour qu'un accès à la base de données
-// seule ne suffise pas à usurper un compte.
 userSchema.methods.getResetPasswordToken = function () {
   const resetToken = crypto.randomBytes(32).toString('hex');
 

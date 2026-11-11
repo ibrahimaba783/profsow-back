@@ -6,16 +6,19 @@ const sendEmail = async (options) => {
   // Si l'utilisateur a configuré ses identifiants SMTP réels dans le fichier .env
   if (process.env.SMTP_USER && process.env.SMTP_PASS) {
     transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
+      host: process.env.SMTP_HOST || 'smtp-relay.brevo.com',
       port: parseInt(process.env.SMTP_PORT) || 587,
       secure: false, // true pour le port 465, false pour les autres
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
+      connectionTimeout: 5000, // 5s max pour établir la connexion SMTP
+      greetingTimeout: 5000,
+      socketTimeout: 7000,     // 7s max pour la communication
     });
   } else {
-    // Sinon, on crée un compte Ethereal de test automatique pour simuler un envoi réel et générer un lien de visualisation
+    // Sinon, fallback console pour ne jamais faire planter le serveur
     try {
       const testAccount = await nodemailer.createTestAccount();
       transporter = nodemailer.createTransport({
@@ -26,14 +29,14 @@ const sendEmail = async (options) => {
           user: testAccount.user,
           pass: testAccount.pass,
         },
+        connectionTimeout: 4000,
       });
-      console.log("Nodemailer : Utilisation du compte Ethereal temporaire pour simuler un envoi réel :", testAccount.user);
+      console.log("Nodemailer : Utilisation du compte Ethereal temporaire :", testAccount.user);
     } catch (err) {
-      console.error("Erreur lors de la création du compte Ethereal. Utilisation d'un transport console.", err);
-      // Fallback ultime : loguer dans la console
+      console.warn("Nodemailer : Fallback sans SMTP, simulation console.");
       return {
-        messageId: 'console-log-fallback',
-        previewUrl: 'N/A'
+        messageId: 'console-log-fallback-' + Date.now(),
+        previewUrl: null
       };
     }
   }
@@ -45,18 +48,23 @@ const sendEmail = async (options) => {
     html: options.html,
   };
 
-  const info = await transporter.sendMail(message);
+  try {
+    const info = await transporter.sendMail(message);
+    console.log('E-mail envoyé avec succès ! ID du message : %s', info.messageId);
 
-  console.log('E-mail envoyé avec succès ! ID du message : %s', info.messageId);
-  
-  // Si on utilise Ethereal, on affiche l'URL de prévisualisation
-  const previewUrl = nodemailer.getTestMessageUrl(info);
-  if (previewUrl) {
-    console.log("Prévisualisez l'e-mail réel envoyé ici : %s", previewUrl);
-    info.previewUrl = previewUrl;
+    // Si on utilise Ethereal, on extrait l'URL de prévisualisation
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) {
+      info.previewUrl = previewUrl;
+    }
+    return info;
+  } catch (error) {
+    console.error("Erreur d'envoi SMTP :", error.message);
+    return {
+      messageId: 'failed-smtp',
+      error: error.message
+    };
   }
-
-  return info;
 };
 
 module.exports = sendEmail;
