@@ -12,8 +12,20 @@ const getCourses = async (req, res) => {
     if (subject) query.subject = subject;
     if (level) query.level = level;
 
-    const courses = await Course.find(query).populate('teacher', 'name email avatar bio');
-    res.json(courses);
+    const courses = await Course.find(query).populate('teacher', 'name email avatar bio').lean();
+    const courseIds = courses.map((c) => c._id);
+    const subCounts = await Subscription.aggregate([
+      { $match: { course: { $in: courseIds }, status: 'active', expiresAt: { $gt: new Date() } } },
+      { $group: { _id: '$course', count: { $sum: 1 } } },
+    ]);
+    const countMap = new Map(subCounts.map((s) => [s._id.toString(), s.count]));
+    const enriched = courses.map((c) => ({
+      ...c,
+      studentsCount: countMap.get(c._id.toString()) || 0,
+      chaptersCount: c.chapters?.length || 0,
+    }));
+    return res.json(enriched);
+    // Enrichissement avec le nombre réel d'apprenants inscrits
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
