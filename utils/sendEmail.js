@@ -9,6 +9,9 @@ const sendEmail = async (options) => {
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT) || 587,
       secure: false, // true pour le port 465, false pour les autres
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 10000,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,

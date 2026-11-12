@@ -6,30 +6,49 @@ const connectDB = require('./config/db');
 // Charger les variables d'environnement
 dotenv.config();
 
-
-// --- DEBUG TEMPORAIRE ---
-console.log('DEBUG SMTP_USER:', process.env.SMTP_USER);
-console.log('DEBUG SMTP_PASS existe:', !!process.env.SMTP_PASS);
-// --- FIN DEBUG ---
-
 // Connexion à la base de données MongoDB
 connectDB();
 
 const app = express();
 
+const envOrigins = (process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((u) => u.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
+const allowedOrigins = new Set([
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+  'https://profsow-front.vercel.app',
+  ...envOrigins,
+]);
+
+const vercelPreviewRegex = /^https:\/\/profsow-front(?:-[a-z0-9-]+)?\.vercel\.app$/i;
+
 // Middlewares globaux
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "https://profsow-front.vercel.app"
-  ],
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-  credentials: true
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    const cleanOrigin = origin.replace(/\/+$/, '');
+    if (allowedOrigins.has(cleanOrigin) || vercelPreviewRegex.test(cleanOrigin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`Origine non autorisée par CORS : ${origin}`));
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
 }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Route de réveil / santé pour Render & Vercel
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 // Routes de l'API
 app.use('/api/auth', require('./routes/authRoutes'));
