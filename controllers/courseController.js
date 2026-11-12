@@ -1,6 +1,13 @@
 const Course = require('../models/Course');
 const Subscription = require('../models/Subscription');
+const User = require('../models/User');
 const { cloudinary } = require('../utils/cloudinary');
+
+const canManageCourse = (course, user) => {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  return user.role === 'teacher' && course.teacher.toString() === user._id.toString();
+};
 
 // @desc    Obtenir tous les cours
 // @route   GET /api/courses
@@ -25,7 +32,6 @@ const getCourses = async (req, res) => {
       chaptersCount: c.chapters?.length || 0,
     }));
     return res.json(enriched);
-    // Enrichissement avec le nombre réel d'apprenants inscrits
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -33,7 +39,7 @@ const getCourses = async (req, res) => {
 
 // @desc    Obtenir un cours spécifique par son ID
 // @route   GET /api/courses/:id
-// @access  Public (contenu complet uniquement si prof propriétaire ou élève abonné)
+// @access  Public (contenu complet uniquement si admin, prof propriétaire ou élève abonné)
 const getCourseById = async (req, res) => {
   try {
     const course = await Course.findById(req.params.id).populate('teacher', 'name email avatar bio');
@@ -41,16 +47,10 @@ const getCourseById = async (req, res) => {
       return res.status(404).json({ message: 'Cours non trouvé' });
     }
 
-    // Détermine si l'utilisateur (peuplé par optionalAuth, peut être undefined) a le droit
-    // de voir le contenu complet (chapitres/leçons/PDF/liens vidéo).
     let hasFullAccess = false;
 
     if (req.user) {
-      const isOwnerTeacher =
-        req.user.role === 'teacher' &&
-        course.teacher._id.toString() === req.user._id.toString();
-
-      if (isOwnerTeacher) {
+      if (canManageCourse(course, req.user)) {
         hasFullAccess = true;
       } else if (req.user.role === 'student') {
         const activeSub = await Subscription.findOne({
@@ -67,10 +67,11 @@ const getCourseById = async (req, res) => {
       return res.json(course);
     }
 
-    // Accès restreint : on renvoie les infos publiques (catalogue) ainsi que le sommaire
-    // (titres des chapitres/leçons) pour donner un aperçu du contenu, à la manière d'une
-    // page de vente de cours — mais SANS le contenu pédagogique réel (pdfPath/youtubeUrl/
-    // meetLink/content), qui reste réservé aux personnes abonnées.
+    const [studentsCount, totalCoursesCount] = await Promise.all([
+      Subscription.countDocuments({ course: course._id, status: 'active', expiresAt: { $gt: new Date() } }),
+      Course.countDocuments(),
+    ]);
+
     const publicCourse = {
       _id: course._id,
       title: course.title,
@@ -83,6 +84,8 @@ const getCourseById = async (req, res) => {
       originalPrice: course.originalPrice,
       image: course.image,
       teacher: course.teacher,
+      studentsCount,
+      totalCoursesCount,
       chaptersCount: course.chapters?.length || 0,
       lessonsCount: course.chapters?.reduce((acc, c) => acc + (c.lessons?.length || 0), 0) || 0,
       chapters: (course.chapters || []).map((chapter) => ({
@@ -102,13 +105,28 @@ const getCourseById = async (req, res) => {
   }
 };
 
-// @desc    Créer un cours (Enseignant uniquement)
+// @desc    Créer un cours (Enseignant ou Administrateur)
 // @route   POST /api/courses
-// @access  Private/Teacher
+// @access  Private/Teacher|Admin
 const createCourse = async (req, res) => {
   try {
-    const { title, description, subject, level, duration, price, isFree, originalPrice } = req.body;
+    const { title, description, subject, level, duration, price, isFree, originalPrice, teacherId } = req.body;
     const courseIsFree = isFree === true || isFree === 'true';
+
+    let resolvedTeacherId = req.user._id;
+    if (req.user.role === 'admin') {
+      if (teacherId) {
+        const targetTeacher = await User.findById(teacherId);
+        if (targetTeacher && ['teacher', 'admin'].includes(targetTeacher.role)) {
+          resolvedTeacherId = targetTeacher._id;
+        }
+      } else {
+        const defaultTeacher = await User.findOne({ role: 'teacher' }).sort({ createdAt: 1 });
+        if (defaultTeacher) {
+          resolvedTeacherId = defaultTeacher._id;
+        }
+      }
+    }
 
     const courseData = {
       title,
@@ -116,13 +134,10 @@ const createCourse = async (req, res) => {
       subject,
       level,
       duration: duration || '3 mois',
-      // Un cours gratuit (offre promotionnelle) a toujours un prix de 0 FCFA,
-      // quelle que soit la valeur envoyée dans le champ prix.
-      price: courseIsFree ? 0 : (price ? parseFloat(price) : 6000),
+      price: courseIsFree ? 0 : (price !== undefined && price !== '' ? parseFloat(price) : 6000),
       isFree: courseIsFree,
-      // Valeur normale affichée barrée sur les cartes quand le cours est en promo gratuite
       originalPrice: originalPrice ? parseFloat(originalPrice) : 6000,
-      teacher: req.user._id,
+      teacher: resolvedTeacherId,
     };
 
     if (req.file) {
@@ -131,7 +146,8 @@ const createCourse = async (req, res) => {
     }
 
     const course = await Course.create(courseData);
-    res.status(201).json(course);
+    const populated = await Course.findById(course._id).populate('teacher', 'name email avatar bio');
+    res.status(201).json(populated);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -139,7 +155,7 @@ const createCourse = async (req, res) => {
 
 // @desc    Mettre à jour un cours
 // @route   PUT /api/courses/:id
-// @access  Private/Teacher
+// @access  Private/Teacher|Admin
 const updateCourse = async (req, res) => {
   try {
     const course = await Course.findById(req.params.id);
@@ -148,8 +164,7 @@ const updateCourse = async (req, res) => {
       return res.status(404).json({ message: 'Cours non trouvé' });
     }
 
-    // Vérifier si le cours appartient bien au professeur connecté
-    if (course.teacher.toString() !== req.user._id.toString()) {
+    if (!canManageCourse(course, req.user)) {
       return res.status(403).json({ message: 'Non autorisé à modifier ce cours' });
     }
 
@@ -158,6 +173,13 @@ const updateCourse = async (req, res) => {
     course.subject = req.body.subject || course.subject;
     course.level = req.body.level || course.level;
     course.duration = req.body.duration || course.duration;
+
+    if (req.user.role === 'admin' && req.body.teacherId) {
+      const targetTeacher = await User.findById(req.body.teacherId);
+      if (targetTeacher && ['teacher', 'admin'].includes(targetTeacher.role)) {
+        course.teacher = targetTeacher._id;
+      }
+    }
 
     if (req.body.isFree !== undefined) {
       course.isFree = req.body.isFree === true || req.body.isFree === 'true';
@@ -168,7 +190,6 @@ const updateCourse = async (req, res) => {
     if (req.body.originalPrice !== undefined) course.originalPrice = parseFloat(req.body.originalPrice);
 
     if (req.file) {
-      // Supprimer l'ancienne image de Cloudinary si elle existe
       if (course.imagePublicId) {
         await cloudinary.uploader.destroy(course.imagePublicId);
       }
@@ -177,7 +198,8 @@ const updateCourse = async (req, res) => {
     }
 
     const updatedCourse = await course.save();
-    res.json(updatedCourse);
+    const populated = await Course.findById(updatedCourse._id).populate('teacher', 'name email avatar bio');
+    res.json(populated);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -185,7 +207,7 @@ const updateCourse = async (req, res) => {
 
 // @desc    Supprimer un cours
 // @route   DELETE /api/courses/:id
-// @access  Private/Teacher
+// @access  Private/Teacher|Admin
 const deleteCourse = async (req, res) => {
   try {
     const course = await Course.findById(req.params.id);
@@ -194,16 +216,14 @@ const deleteCourse = async (req, res) => {
       return res.status(404).json({ message: 'Cours non trouvé' });
     }
 
-    if (course.teacher.toString() !== req.user._id.toString()) {
+    if (!canManageCourse(course, req.user)) {
       return res.status(403).json({ message: 'Non autorisé à supprimer ce cours' });
     }
 
-    // Supprimer l'image principale de Cloudinary
     if (course.imagePublicId) {
       await cloudinary.uploader.destroy(course.imagePublicId);
     }
 
-    // Supprimer les PDF associés de toutes les leçons
     for (const chapter of course.chapters) {
       for (const lesson of chapter.lessons) {
         if (lesson.pdfPublicId) {
@@ -221,7 +241,7 @@ const deleteCourse = async (req, res) => {
 
 // @desc    Ajouter un chapitre à un cours
 // @route   POST /api/courses/:id/chapters
-// @access  Private/Teacher
+// @access  Private/Teacher|Admin
 const addChapter = async (req, res) => {
   try {
     const { title } = req.body;
@@ -231,7 +251,7 @@ const addChapter = async (req, res) => {
       return res.status(404).json({ message: 'Cours non trouvé' });
     }
 
-    if (course.teacher.toString() !== req.user._id.toString()) {
+    if (!canManageCourse(course, req.user)) {
       return res.status(403).json({ message: 'Non autorisé' });
     }
 
@@ -245,7 +265,7 @@ const addChapter = async (req, res) => {
 
 // @desc    Ajouter une leçon à un chapitre
 // @route   POST /api/courses/:id/chapters/:chapterId/lessons
-// @access  Private/Teacher
+// @access  Private/Teacher|Admin
 const addLesson = async (req, res) => {
   try {
     const { title, contentType, youtubeUrl, meetLink, content } = req.body;
@@ -255,7 +275,7 @@ const addLesson = async (req, res) => {
       return res.status(404).json({ message: 'Cours non trouvé' });
     }
 
-    if (course.teacher.toString() !== req.user._id.toString()) {
+    if (!canManageCourse(course, req.user)) {
       return res.status(403).json({ message: 'Non autorisé' });
     }
 
@@ -287,7 +307,7 @@ const addLesson = async (req, res) => {
 
 // @desc    Supprimer un chapitre d'un cours
 // @route   DELETE /api/courses/:id/chapters/:chapterId
-// @access  Private/Teacher
+// @access  Private/Teacher|Admin
 const deleteChapter = async (req, res) => {
   try {
     const course = await Course.findById(req.params.id);
@@ -296,7 +316,7 @@ const deleteChapter = async (req, res) => {
       return res.status(404).json({ message: 'Cours non trouvé' });
     }
 
-    if (course.teacher.toString() !== req.user._id.toString()) {
+    if (!canManageCourse(course, req.user)) {
       return res.status(403).json({ message: 'Non autorisé' });
     }
 
@@ -305,7 +325,6 @@ const deleteChapter = async (req, res) => {
       return res.status(404).json({ message: 'Chapitre non trouvé' });
     }
 
-    // Supprimer les PDF associés aux leçons de ce chapitre de Cloudinary
     for (const lesson of chapter.lessons) {
       if (lesson.pdfPublicId) {
         await cloudinary.uploader.destroy(lesson.pdfPublicId, { resource_type: 'raw' });
@@ -322,7 +341,7 @@ const deleteChapter = async (req, res) => {
 
 // @desc    Supprimer une leçon d'un chapitre
 // @route   DELETE /api/courses/:id/chapters/:chapterId/lessons/:lessonId
-// @access  Private/Teacher
+// @access  Private/Teacher|Admin
 const deleteLesson = async (req, res) => {
   try {
     const course = await Course.findById(req.params.id);
@@ -331,7 +350,7 @@ const deleteLesson = async (req, res) => {
       return res.status(404).json({ message: 'Cours non trouvé' });
     }
 
-    if (course.teacher.toString() !== req.user._id.toString()) {
+    if (!canManageCourse(course, req.user)) {
       return res.status(403).json({ message: 'Non autorisé' });
     }
 
@@ -345,7 +364,6 @@ const deleteLesson = async (req, res) => {
       return res.status(404).json({ message: 'Leçon non trouvée' });
     }
 
-    // Supprimer le PDF de Cloudinary si existant
     if (lesson.pdfPublicId) {
       await cloudinary.uploader.destroy(lesson.pdfPublicId, { resource_type: 'raw' });
     }

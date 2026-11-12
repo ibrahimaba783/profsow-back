@@ -51,15 +51,17 @@ const courseSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Veuillez ajouter une description au cours'],
     },
+    // Matière et niveau ouverts afin que l'administrateur puisse en ajouter
+    // depuis le Back-Office sans modifier le code source.
     subject: {
       type: String,
       required: [true, 'Veuillez spécifier la matière'],
-      enum: ['Mathématiques', 'Physique-Chimie'],
+      trim: true,
     },
     level: {
       type: String,
       required: [true, 'Veuillez spécifier le niveau'],
-      enum: ['4ème', '3ème', '2nde S', '1ère S', 'TS'],
+      trim: true,
     },
     // Durée affichée sur les cartes de cours (ex: "3 mois", "10h", "1 an")
     duration: {

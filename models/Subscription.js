@@ -37,6 +37,10 @@ const subscriptionSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    completedLessons: {
+      type: [String],
+      default: [],
+    },
   },
   {
     timestamps: true,

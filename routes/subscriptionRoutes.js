@@ -6,6 +6,7 @@ const {
   getMySubscriptions,
   checkSubscriptionStatus,
   getTeacherStudents,
+  toggleLessonProgress,
 } = require('../controllers/subscriptionController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
@@ -21,7 +22,10 @@ router.route('/my')
 router.route('/check/:courseId')
   .get(protect, checkSubscriptionStatus);
 
+router.route('/progress/:courseId')
+  .put(protect, toggleLessonProgress);
+
 router.route('/teacher/students')
-  .get(protect, authorize('teacher'), getTeacherStudents);
+  .get(protect, authorize('teacher', 'admin'), getTeacherStudents);
 
 module.exports = router;

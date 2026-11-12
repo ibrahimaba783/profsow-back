@@ -48,7 +48,14 @@ const createSubscription = async (req, res) => {
       month: 'long',
       day: 'numeric',
     });
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
+    const origin = req?.headers?.origin;
+    const envUrl = (process.env.FRONTEND_URL || '').split(',')[0].trim().replace(/\/+$/, '');
+    const frontendUrl =
+      origin && /^https?:\/\/(localhost:\d+|127\.0\.0\.1:\d+|profsow-front(?:-[a-z0-9-]+)?\.vercel\.app)$/i.test(origin)
+        ? origin.replace(/\/+$/, '')
+        : envUrl && !envUrl.includes('localhost')
+        ? envUrl
+        : 'https://profsow-front.vercel.app';
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #10B981; border-radius: 10px; background-color: #ffffff;">
         <h2 style="color: #10B981; text-align: center; border-bottom: 2px solid #10B981; padding-bottom: 10px;">Paiement Confirmé !</h2>
@@ -198,7 +205,7 @@ const checkSubscriptionStatus = async (req, res) => {
 // @access  Private/Teacher
 const getTeacherStudents = async (req, res) => {
   try {
-    const courses = await Course.find({ teacher: req.user._id });
+    const courses = req.user.role === 'admin' ? await Course.find() : await Course.find({ teacher: req.user._id });
     const courseIds = courses.map(c => c._id);
 
     const subscriptions = await Subscription.find({ course: { $in: courseIds } })
@@ -211,10 +218,51 @@ const getTeacherStudents = async (req, res) => {
   }
 };
 
+// @desc    Marquer ou démarquer une leçon comme terminée pour suivre la progression
+// @route   PUT /api/subscriptions/progress/:courseId
+// @access  Private
+const toggleLessonProgress = async (req, res) => {
+  try {
+    const { lessonId, completed } = req.body;
+    if (!lessonId) {
+      return res.status(400).json({ message: 'Identifiant de leçon requis' });
+    }
+
+    const subscription = await Subscription.findOne({
+      student: req.user._id,
+      course: req.params.courseId,
+      status: 'active',
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (!subscription) {
+      return res.status(404).json({ message: 'Aucun abonnement actif trouvé pour ce cours' });
+    }
+
+    const current = Array.isArray(subscription.completedLessons)
+      ? subscription.completedLessons.map(String)
+      : [];
+    const targetId = String(lessonId);
+    const shouldComplete = typeof completed === 'boolean' ? completed : !current.includes(targetId);
+
+    if (shouldComplete && !current.includes(targetId)) {
+      subscription.completedLessons.push(targetId);
+    } else if (!shouldComplete) {
+      subscription.completedLessons = current.filter((item) => item !== targetId);
+    }
+
+    await subscription.save();
+    res.json({ completedLessons: subscription.completedLessons });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   createSubscription,
   enrollFreeCourse,
   getMySubscriptions,
   checkSubscriptionStatus,
   getTeacherStudents,
+  toggleLessonProgress,
 };

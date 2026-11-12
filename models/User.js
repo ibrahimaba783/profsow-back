@@ -28,8 +28,22 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['student', 'teacher'],
+      enum: ['student', 'teacher', 'admin'],
       default: 'student',
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    phone: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    title: {
+      type: String,
+      default: '',
+      trim: true,
     },
     avatar: {
       type: String,
@@ -39,7 +53,42 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
-    // Informations optionnelles pour le professeur Aliou Sow ou autres
+    firstName: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    lastName: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    birthDate: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    gender: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    location: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    address: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    disabilityStatus: {
+      type: String,
+      default: 'Aucun handicap déclaré',
+      trim: true,
+    },
+    // Informations optionnelles pour le professeur Aliou Sow ou administrateur
     subjects: {
       type: [String],
       default: ['Mathématiques', 'Physique-Chimie'],
@@ -47,6 +96,11 @@ const userSchema = new mongoose.Schema(
     levels: {
       type: [String],
       default: ['4ème', '3ème', '2nde S', '1ère S', 'TS'],
+    },
+    preferences: {
+      emailNotifications: { type: Boolean, default: true },
+      liveReminders: { type: Boolean, default: true },
+      newsletter: { type: Boolean, default: false },
     },
     // Réinitialisation de mot de passe : on stocke un HASH du jeton (jamais
     // le jeton en clair) avec une date d'expiration courte.

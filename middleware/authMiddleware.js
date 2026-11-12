@@ -19,6 +19,12 @@ const protect = async (req, res, next) => {
         return res.status(401).json({ message: 'Utilisateur non trouvé' });
       }
 
+      if (req.user.isActive === false) {
+        return res.status(403).json({
+          message: 'Votre compte a été suspendu. Contactez l\'administrateur.',
+        });
+      }
+
       return next();
     } catch (error) {
       console.error(error);
@@ -46,7 +52,8 @@ const optionalAuth = async (req, res, next) => {
     try {
       token = req.headers.authorization.split(' ')[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = await User.findById(decoded.id).select('-password');
+      const user = await User.findById(decoded.id).select('-password');
+      req.user = user && user.isActive !== false ? user : undefined;
     } catch (error) {
       // Token invalide/expiré : on ignore silencieusement, req.user reste undefined
       req.user = undefined;

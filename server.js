@@ -58,6 +58,8 @@ app.use('/api/quizzes', require('./routes/quizRoutes'));
 app.use('/api/discussions', require('./routes/discussionRoutes'));
 app.use('/api/stats', require('./routes/statsRoutes'));
 app.use('/api/reviews', require('./routes/reviewRoutes'));
+app.use('/api/settings', require('./routes/settingRoutes'));
+app.use('/api/admin', require('./routes/adminRoutes'));
 
 // Route de test
 app.get('/', (req, res) => {

@@ -34,6 +34,43 @@ const getFrontendUrl = (req) => {
   return 'https://profsow-front.vercel.app';
 };
 
+const safeJsonParse = (val, fallback) => {
+  if (typeof val !== 'string') return val ?? fallback;
+  try {
+    return JSON.parse(val);
+  } catch {
+    return fallback;
+  }
+};
+
+const formatUserResponse = (user, extra = {}) => ({
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  isActive: user.isActive !== false,
+  phone: user.phone || '',
+  title: user.title || '',
+  avatar: user.avatar,
+  bio: user.bio || '',
+  firstName: user.firstName || '',
+  lastName: user.lastName || '',
+  birthDate: user.birthDate || '',
+  gender: user.gender || '',
+  location: user.location || '',
+  address: user.address || '',
+  disabilityStatus: user.disabilityStatus || 'Aucun handicap déclaré',
+  subjects: user.subjects || [],
+  levels: user.levels || [],
+  preferences: user.preferences || {
+    emailNotifications: true,
+    liveReminders: true,
+    newsletter: false,
+  },
+  createdAt: user.createdAt,
+  ...extra,
+});
+
 // Générer le Token JWT
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -64,11 +101,7 @@ const registerUser = async (req, res) => {
       return res.status(400).json({ message: 'Un compte existe déjà avec cet email.' });
     }
 
-    // SÉCURITÉ : l'inscription publique ne crée JAMAIS de compte enseignant,
-    // quelle que soit la valeur envoyée par le client. Le rôle est forcé
-    // côté serveur pour empêcher qu'une requête API directe (Postman, etc.)
-    // ne s'auto-attribue le rôle "teacher". Le compte professeur (unique,
-    // M. Aliou Sow) est créé séparément via le script scripts/createTeacher.js.
+    // SÉCURITÉ : l'inscription publique ne crée JAMAIS de compte enseignant ou admin.
     const user = await User.create({
       name: cleanName,
       email: cleanEmail,
@@ -77,9 +110,8 @@ const registerUser = async (req, res) => {
     });
 
     if (user) {
-      // Envoyer un e-mail de bienvenue
       const subject = 'Bienvenue sur Aliou Sow Academy !';
-      const roleText = user.role === 'teacher' ? 'Enseignant' : 'Étudiant';
+      const roleText = 'Étudiant';
       const frontendUrl = getFrontendUrl(req);
       const html = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #009688; border-radius: 10px; background-color: #fcfcfc;">
@@ -116,17 +148,13 @@ const registerUser = async (req, res) => {
         emailStatus = 'failed';
       }
 
-      res.status(201).json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        bio: user.bio,
-        token: generateToken(user._id),
-        emailStatus,
-        emailPreviewUrl: previewUrl,
-      });
+      res.status(201).json(
+        formatUserResponse(user, {
+          token: generateToken(user._id),
+          emailStatus,
+          emailPreviewUrl: previewUrl,
+        })
+      );
     } else {
       res.status(400).json({ message: 'Données utilisateur invalides' });
     }
@@ -153,17 +181,16 @@ const loginUser = async (req, res) => {
     const user = await findUserByEmail(cleanEmail, true);
 
     if (user && (await user.matchPassword(password))) {
-      res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        bio: user.bio,
-        subjects: user.subjects,
-        levels: user.levels,
-        token: generateToken(user._id),
-      });
+      if (user.isActive === false) {
+        return res.status(403).json({
+          message: "Ce compte a été désactivé par l'administrateur.",
+        });
+      }
+      res.json(
+        formatUserResponse(user, {
+          token: generateToken(user._id),
+        })
+      );
     } else {
       res.status(401).json({ message: 'Email ou mot de passe incorrect' });
     }
@@ -180,16 +207,7 @@ const getUserProfile = async (req, res) => {
     const user = await User.findById(req.user._id);
 
     if (user) {
-      res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        bio: user.bio,
-        subjects: user.subjects,
-        levels: user.levels,
-      });
+      res.json(formatUserResponse(user));
     } else {
       res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
@@ -208,37 +226,70 @@ const updateUserProfile = async (req, res) => {
     if (user) {
       user.name = req.body.name ? req.body.name.trim() : user.name;
       if (req.body.email) {
-        user.email = normalizeEmail(req.body.email);
+        const nextEmail = normalizeEmail(req.body.email);
+        if (nextEmail !== user.email) {
+          const dup = await User.findOne({ email: nextEmail, _id: { $ne: user._id } });
+          if (dup) {
+            return res.status(400).json({ message: 'Cet email est déjà utilisé par un autre compte.' });
+          }
+          user.email = nextEmail;
+        }
       }
-      user.bio = req.body.bio !== undefined ? req.body.bio : user.bio;
+      if (req.body.bio !== undefined) user.bio = req.body.bio;
+      if (req.body.phone !== undefined) user.phone = String(req.body.phone).trim();
+      if (req.body.title !== undefined) user.title = String(req.body.title).trim();
+      if (req.body.firstName !== undefined) user.firstName = String(req.body.firstName).trim();
+      if (req.body.lastName !== undefined) user.lastName = String(req.body.lastName).trim();
+      if (req.body.birthDate !== undefined) user.birthDate = String(req.body.birthDate).trim();
+      if (req.body.gender !== undefined) user.gender = String(req.body.gender).trim();
+      if (req.body.location !== undefined) user.location = String(req.body.location).trim();
+      if (req.body.address !== undefined) user.address = String(req.body.address).trim();
+      if (req.body.disabilityStatus !== undefined) {
+        user.disabilityStatus = String(req.body.disabilityStatus).trim() || 'Aucun handicap déclaré';
+      }
+      if ((req.body.firstName !== undefined || req.body.lastName !== undefined) && !req.body.name) {
+        const combined = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
+        if (combined) user.name = combined;
+      }
+
+      if (req.body.preferences !== undefined) {
+        const parsedPrefs = safeJsonParse(req.body.preferences, null);
+        if (parsedPrefs && typeof parsedPrefs === 'object') {
+          user.preferences = {
+            ...(user.preferences ? user.preferences.toObject?.() || user.preferences : {}),
+            ...parsedPrefs,
+          };
+        }
+      }
 
       // Si une nouvelle image a été envoyée
       if (req.file) {
-        user.avatar = req.file.path; // URL Cloudinary renvoyée par le middleware
+        user.avatar = req.file.path;
       }
 
-      if (user.role === 'teacher') {
-        user.subjects = req.body.subjects ? JSON.parse(req.body.subjects) : user.subjects;
-        user.levels = req.body.levels ? JSON.parse(req.body.levels) : user.levels;
+      if (user.role === 'teacher' || user.role === 'admin') {
+        if (req.body.subjects) {
+          user.subjects = safeJsonParse(req.body.subjects, user.subjects);
+        }
+        if (req.body.levels) {
+          user.levels = safeJsonParse(req.body.levels, user.levels);
+        }
       }
 
       if (req.body.password) {
+        if (String(req.body.password).length < 6) {
+          return res.status(400).json({ message: 'Le mot de passe doit contenir au moins 6 caractères.' });
+        }
         user.password = req.body.password;
       }
 
       const updatedUser = await user.save();
 
-      res.json({
-        _id: updatedUser._id,
-        name: updatedUser.name,
-        email: updatedUser.email,
-        role: updatedUser.role,
-        avatar: updatedUser.avatar,
-        bio: updatedUser.bio,
-        subjects: updatedUser.subjects,
-        levels: updatedUser.levels,
-        token: generateToken(updatedUser._id),
-      });
+      res.json(
+        formatUserResponse(updatedUser, {
+          token: generateToken(updatedUser._id),
+        })
+      );
     } else {
       res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
@@ -255,8 +306,6 @@ const forgotPassword = async (req, res) => {
     const cleanEmail = normalizeEmail(req.body.email);
     const user = await findUserByEmail(cleanEmail);
 
-    // IMPORTANT : on renvoie toujours le même message, que l'email existe ou
-    // non en base, pour éviter l'énumération de comptes.
     const genericResponse = {
       message: "Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé.",
     };
@@ -330,7 +379,7 @@ const resetPassword = async (req, res) => {
       return res.status(400).json({ message: 'Ce lien de réinitialisation est invalide ou a expiré' });
     }
 
-    user.password = password; // re-hashé automatiquement par le hook pre('save')
+    user.password = password;
     user.resetPasswordToken = undefined;
     user.resetPasswordExpire = undefined;
     await user.save();
@@ -353,7 +402,6 @@ const googleAuth = async (req, res) => {
       return res.status(400).json({ message: 'Jeton Google manquant' });
     }
 
-    // Vérification du jeton côté serveur
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
       audience: GOOGLE_CLIENT_ID,
@@ -368,7 +416,6 @@ const googleAuth = async (req, res) => {
     let user = await findUserByEmail(cleanEmail);
 
     if (!user) {
-      // SÉCURITÉ : le rôle est forcé à "student"
       user = await User.create({
         name: name || cleanEmail.split('@')[0],
         email: cleanEmail,
@@ -376,19 +423,17 @@ const googleAuth = async (req, res) => {
         role: 'student',
         ...(picture ? { avatar: picture } : {}),
       });
+    } else if (user.isActive === false) {
+      return res.status(403).json({
+        message: "Ce compte a été désactivé par l'administrateur.",
+      });
     }
 
-    res.json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      avatar: user.avatar,
-      bio: user.bio,
-      subjects: user.subjects,
-      levels: user.levels,
-      token: generateToken(user._id),
-    });
+    res.json(
+      formatUserResponse(user, {
+        token: generateToken(user._id),
+      })
+    );
   } catch (error) {
     console.error('ERREUR GOOGLE AUTH :', error.message);
     res.status(401).json({ message: 'Connexion Google invalide' });

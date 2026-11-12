@@ -2,9 +2,12 @@ const Quiz = require('../models/Quiz');
 const QuizResult = require('../models/QuizResult');
 const Course = require('../models/Course');
 
-// @desc    Créer un quiz (Enseignant uniquement)
+const canManageCourse = (course, user) =>
+  user.role === 'admin' || (course && course.teacher.toString() === user._id.toString());
+
+// @desc    Créer un quiz (Enseignant ou Admin)
 // @route   POST /api/quizzes
-// @access  Private/Teacher
+// @access  Private/Teacher|Admin
 const createQuiz = async (req, res) => {
   try {
     const { courseId, title, questions } = req.body;
@@ -14,7 +17,7 @@ const createQuiz = async (req, res) => {
       return res.status(404).json({ message: 'Cours non trouvé' });
     }
 
-    if (course.teacher.toString() !== req.user._id.toString()) {
+    if (!canManageCourse(course, req.user)) {
       return res.status(403).json({ message: 'Non autorisé' });
     }
 
@@ -62,7 +65,7 @@ const getQuizById = async (req, res) => {
 // @access  Private
 const submitQuizResponse = async (req, res) => {
   try {
-    const { answers } = req.body; // Tableau contenant les indices des réponses de l'élève
+    const { answers } = req.body;
     const quiz = await Quiz.findById(req.params.id);
 
     if (!quiz) {
@@ -96,23 +99,25 @@ const submitQuizResponse = async (req, res) => {
   }
 };
 
-// @desc    Obtenir tous les résultats des étudiants (Enseignant uniquement)
+// @desc    Obtenir tous les résultats des étudiants (Enseignant ou Admin)
 // @route   GET /api/quizzes/teacher/results
-// @access  Private/Teacher
+// @access  Private/Teacher|Admin
 const getTeacherQuizResults = async (req, res) => {
   try {
-    const courses = await Course.find({ teacher: req.user._id });
-    const courseIds = courses.map(c => c._id);
+    const courses = req.user.role === 'admin'
+      ? await Course.find()
+      : await Course.find({ teacher: req.user._id });
+    const courseIds = courses.map((c) => c._id);
 
     const quizzes = await Quiz.find({ course: { $in: courseIds } });
-    const quizIds = quizzes.map(q => q._id);
+    const quizIds = quizzes.map((q) => q._id);
 
     const results = await QuizResult.find({ quiz: { $in: quizIds } })
       .populate('student', 'name email avatar')
       .populate({
         path: 'quiz',
         select: 'title course',
-        populate: { path: 'course', select: 'title' }
+        populate: { path: 'course', select: 'title' },
       });
 
     res.json(results);
@@ -121,7 +126,7 @@ const getTeacherQuizResults = async (req, res) => {
   }
 };
 
-// @desc    Obtenir les résultats du étudiant connecté
+// @desc    Obtenir les résultats de l'étudiant connecté
 // @route   GET /api/quizzes/student/results
 // @access  Private
 const getStudentQuizResults = async (req, res) => {
@@ -130,7 +135,7 @@ const getStudentQuizResults = async (req, res) => {
       .populate({
         path: 'quiz',
         select: 'title course',
-        populate: { path: 'course', select: 'title' }
+        populate: { path: 'course', select: 'title' },
       });
     res.json(results);
   } catch (error) {
@@ -138,9 +143,9 @@ const getStudentQuizResults = async (req, res) => {
   }
 };
 
-// @desc    Modifier un quiz (Enseignant uniquement, doit être propriétaire du cours)
+// @desc    Modifier un quiz (Enseignant propriétaire ou Admin)
 // @route   PUT /api/quizzes/:id
-// @access  Private/Teacher
+// @access  Private/Teacher|Admin
 const updateQuiz = async (req, res) => {
   try {
     const { title, questions } = req.body;
@@ -150,7 +155,7 @@ const updateQuiz = async (req, res) => {
       return res.status(404).json({ message: 'Quiz non trouvé' });
     }
 
-    if (quiz.course.teacher.toString() !== req.user._id.toString()) {
+    if (!canManageCourse(quiz.course, req.user)) {
       return res.status(403).json({ message: 'Non autorisé' });
     }
 
@@ -164,9 +169,9 @@ const updateQuiz = async (req, res) => {
   }
 };
 
-// @desc    Supprimer un quiz (Enseignant uniquement, doit être propriétaire du cours)
+// @desc    Supprimer un quiz (Enseignant propriétaire ou Admin)
 // @route   DELETE /api/quizzes/:id
-// @access  Private/Teacher
+// @access  Private/Teacher|Admin
 const deleteQuiz = async (req, res) => {
   try {
     const quiz = await Quiz.findById(req.params.id).populate('course', 'teacher');
@@ -175,12 +180,10 @@ const deleteQuiz = async (req, res) => {
       return res.status(404).json({ message: 'Quiz non trouvé' });
     }
 
-    if (quiz.course.teacher.toString() !== req.user._id.toString()) {
+    if (!canManageCourse(quiz.course, req.user)) {
       return res.status(403).json({ message: 'Non autorisé' });
     }
 
-    // On supprime aussi les résultats liés à ce quiz, sinon ils restent
-    // orphelins en base et pourraient fausser d'éventuelles statistiques.
     await QuizResult.deleteMany({ quiz: quiz._id });
     await quiz.deleteOne();
 

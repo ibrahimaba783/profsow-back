@@ -13,21 +13,21 @@ const {
 const { protect, authorize } = require('../middleware/authMiddleware');
 
 router.route('/')
-  .post(protect, authorize('teacher'), createQuiz);
+  .post(protect, authorize('teacher', 'admin'), createQuiz);
 
 router.route('/course/:courseId')
   .get(protect, getQuizzesByCourse);
 
 router.route('/teacher/results')
-  .get(protect, authorize('teacher'), getTeacherQuizResults);
+  .get(protect, authorize('teacher', 'admin'), getTeacherQuizResults);
 
 router.route('/student/results')
   .get(protect, getStudentQuizResults);
 
 router.route('/:id')
   .get(protect, getQuizById)
-  .put(protect, authorize('teacher'), updateQuiz)
-  .delete(protect, authorize('teacher'), deleteQuiz);
+  .put(protect, authorize('teacher', 'admin'), updateQuiz)
+  .delete(protect, authorize('teacher', 'admin'), deleteQuiz);
 
 router.route('/:id/submit')
   .post(protect, submitQuizResponse);
