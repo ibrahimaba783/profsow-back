@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   createQuiz,
   getQuizzesByCourse,
+  getTeacherQuizzes,
   getQuizById,
   submitQuizResponse,
   getTeacherQuizResults,
@@ -17,6 +18,9 @@ router.route('/')
 
 router.route('/course/:courseId')
   .get(protect, getQuizzesByCourse);
+
+router.route('/teacher/all')
+  .get(protect, authorize('teacher', 'admin'), getTeacherQuizzes);
 
 router.route('/teacher/results')
   .get(protect, authorize('teacher', 'admin'), getTeacherQuizResults);

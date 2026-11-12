@@ -38,7 +38,28 @@ const chapterSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Veuillez ajouter un titre au chapitre'],
   },
+  isLocked: {
+    type: Boolean,
+    default: false,
+  },
   lessons: [lessonSchema],
+});
+
+const announcementSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: [true, "Le titre de l'annonce est obligatoire"],
+    trim: true,
+  },
+  message: {
+    type: String,
+    required: [true, "Le message de l'annonce est obligatoire"],
+    trim: true,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
 });
 
 const courseSchema = new mongoose.Schema(
@@ -76,6 +97,10 @@ const courseSchema = new mongoose.Schema(
       type: Boolean,
       default: false, // true = module offert gratuitement (offre promotionnelle)
     },
+    isPublished: {
+      type: Boolean,
+      default: true,
+    },
     originalPrice: {
       type: Number,
       default: 6000, // Valeur normale affichée barrée quand le cours est en promotion gratuite
@@ -94,6 +119,7 @@ const courseSchema = new mongoose.Schema(
       default: '',
     },
     chapters: [chapterSchema],
+    announcements: [announcementSchema],
   },
   {
     timestamps: true,

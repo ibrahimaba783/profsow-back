@@ -20,6 +20,14 @@ const quizResultSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
+    passed: {
+      type: Boolean,
+      default: true,
+    },
+    answers: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
   },
   {
     timestamps: true,

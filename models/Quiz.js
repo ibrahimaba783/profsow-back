@@ -5,14 +5,22 @@ const questionSchema = new mongoose.Schema({
     type: String,
     required: [true, 'La question est obligatoire'],
   },
+  questionType: {
+    type: String,
+    enum: ['qcm', 'true_false', 'text'],
+    default: 'qcm',
+  },
   options: {
     type: [String],
-    required: [true, 'Les options sont obligatoires'],
-    validate: [arr => arr.length >= 2, 'Il faut au moins deux options'],
+    default: [],
   },
   correctAnswerIndex: {
     type: Number,
-    required: [true, "L'indice de la bonne réponse est obligatoire"],
+    default: 0,
+  },
+  correctAnswerText: {
+    type: String,
+    default: '',
   },
 });
 
@@ -23,9 +31,28 @@ const quizSchema = new mongoose.Schema(
       ref: 'Course',
       required: true,
     },
+    chapterId: {
+      type: String,
+      default: '',
+    },
+    chapterTitle: {
+      type: String,
+      default: '',
+    },
     title: {
       type: String,
       required: [true, 'Le titre du quiz est obligatoire'],
+    },
+    passingScore: {
+      type: Number,
+      default: 50,
+      min: 0,
+      max: 100,
+    },
+    maxAttempts: {
+      type: Number,
+      default: 0, // 0 = illimité
+      min: 0,
     },
     questions: [questionSchema],
   },

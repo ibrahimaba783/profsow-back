@@ -55,6 +55,7 @@ app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/courses', require('./routes/courseRoutes'));
 app.use('/api/subscriptions', require('./routes/subscriptionRoutes'));
 app.use('/api/quizzes', require('./routes/quizRoutes'));
+app.use('/api/exercises', require('./routes/exerciseRoutes'));
 app.use('/api/discussions', require('./routes/discussionRoutes'));
 app.use('/api/stats', require('./routes/statsRoutes'));
 app.use('/api/reviews', require('./routes/reviewRoutes'));

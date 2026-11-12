@@ -15,6 +15,7 @@ const {
   assignCourseTeacher,
 } = require('../controllers/adminController');
 const { protect, authorize } = require('../middleware/authMiddleware');
+const { uploadImage } = require('../utils/cloudinary');
 
 router.use(protect, authorize('admin'));
 
@@ -25,7 +26,7 @@ router.route('/users')
   .post(createUser);
 
 router.route('/users/:id')
-  .put(updateUser)
+  .put(uploadImage.single('avatar'), updateUser)
   .delete(deleteUser);
 
 router.route('/subscriptions')

@@ -2,7 +2,7 @@ const Subscription = require('../models/Subscription');
 const Course = require('../models/Course');
 const sendEmail = require('../utils/sendEmail');
 
-// @desc    Créer un abonnement (Paiement simulé)
+// @desc    Créer un nouvel abonnement (Simulation Wave / Orange Money)
 // @route   POST /api/subscriptions
 // @access  Private
 const createSubscription = async (req, res) => {
@@ -14,7 +14,6 @@ const createSubscription = async (req, res) => {
       return res.status(404).json({ message: 'Cours non trouvé' });
     }
 
-    // Vérifier s'il y a déjà un abonnement actif
     const existingSub = await Subscription.findOne({
       student: req.user._id,
       course: courseId,
@@ -23,13 +22,11 @@ const createSubscription = async (req, res) => {
     });
 
     if (existingSub) {
-      return res.status(400).json({ message: 'Vous disposez déjà d\'un abonnement actif pour ce cours' });
+      return res.status(400).json({ message: 'Vous êtes déjà abonné à ce cours' });
     }
 
-    // Calculer la date d'expiration
-    const months = durationMonths ? parseInt(durationMonths) : 12; // 1 an renouvelable selon le CDC pour l'accès standard
     const expiresAt = new Date();
-    expiresAt.setMonth(expiresAt.getMonth() + months);
+    expiresAt.setMonth(expiresAt.getMonth() + (durationMonths || 12));
 
     const subscription = await Subscription.create({
       student: req.user._id,
@@ -41,55 +38,39 @@ const createSubscription = async (req, res) => {
       status: 'active',
     });
 
-    // Envoyer un e-mail réel de confirmation de paiement
-    const subject = `Confirmation d'abonnement - Cours : ${course.title}`;
-    const formattedExpires = expiresAt.toLocaleDateString('fr-FR', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
-    const origin = req?.headers?.origin;
-    const envUrl = (process.env.FRONTEND_URL || '').split(',')[0].trim().replace(/\/+$/, '');
-    const frontendUrl =
-      origin && /^https?:\/\/(localhost:\d+|127\.0\.0\.1:\d+|profsow-front(?:-[a-z0-9-]+)?\.vercel\.app)$/i.test(origin)
-        ? origin.replace(/\/+$/, '')
-        : envUrl && !envUrl.includes('localhost')
-        ? envUrl
-        : 'https://profsow-front.vercel.app';
-    const html = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #10B981; border-radius: 10px; background-color: #ffffff;">
-        <h2 style="color: #10B981; text-align: center; border-bottom: 2px solid #10B981; padding-bottom: 10px;">Paiement Confirmé !</h2>
-        <p>Bonjour <strong>${req.user.name}</strong>,</p>
-        <p>Votre abonnement au cours de <strong>${course.title}</strong> a été activé avec succès.</p>
-        
-        <h3 style="color: #374151; margin-top: 20px;">Détails de la transaction :</h3>
-        <table style="width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 14px;">
-          <tr style="background-color: #f9fafb;"><td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Cours :</strong></td><td style="padding: 10px; border: 1px solid #e5e7eb;">${course.title} (${course.level})</td></tr>
-          <tr><td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Matière :</strong></td><td style="padding: 10px; border: 1px solid #e5e7eb;">${course.subject}</td></tr>
-          <tr style="background-color: #f9fafb;"><td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Mode de règlement :</strong></td><td style="padding: 10px; border: 1px solid #e5e7eb;">${paymentMethod}</td></tr>
-          <tr><td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Numéro de transaction :</strong></td><td style="padding: 10px; border: 1px solid #e5e7eb;"><code>${transactionId}</code></td></tr>
-          <tr style="background-color: #f9fafb;"><td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Montant réglé :</strong></td><td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>${amount || course.price} FCFA</strong></td></tr>
-          <tr><td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Fin de validité :</strong></td><td style="padding: 10px; border: 1px solid #e5e7eb; color: #b91c1c;"><strong>${formattedExpires}</strong></td></tr>
-        </table>
-        
-        <p>Vous pouvez maintenant accéder à l'ensemble des chapitres, vidéos YouTube, documents PDF et liens Google Meet.</p>
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="${frontendUrl}/courses/${course._id}" style="background-color: #10B981; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Commencer à étudier</a>
-        </div>
-        <hr style="border: 0; border-top: 1px solid #e5e7eb;">
-        <p style="font-size: 11px; color: #9ca3af; text-align: center;">Ce message a été envoyé automatiquement. Veuillez ne pas y répondre directement.</p>
-      </div>
-    `;
-
     let emailStatus = 'sent';
     let previewUrl = '';
     try {
-      const mailInfo = await sendEmail({ email: req.user.email, subject, html });
+      const subject = `Confirmation d'abonnement - ${course.title}`;
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #6366f1; border-radius: 10px; background-color: #ffffff;">
+          <h2 style="color: #6366f1; text-align: center;">Paiement Validé &amp; Accès Activé !</h2>
+          <p>Bonjour <strong>${req.user.name}</strong>,</p>
+          <p>Merci pour votre abonnement au cours <strong>${course.title}</strong> (${course.subject} - ${course.level}).</p>
+          <p>Détails de votre transaction :</p>
+          <table style="width: 100%; background-color: #f3f4f6; border-radius: 5px; padding: 10px; margin: 15px 0;">
+            <tr><td><strong>Méthode de paiement :</strong></td><td>${paymentMethod}</td></tr>
+            <tr><td><strong>ID Transaction :</strong></td><td>${transactionId}</td></tr>
+            <tr><td><strong>Montant payé :</strong></td><td>${amount || course.price} FCFA</td></tr>
+            <tr><td><strong>Date d'expiration :</strong></td><td>${expiresAt.toLocaleDateString('fr-FR')}</td></tr>
+          </table>
+          <p style="font-size: 13px; color: #4b5563;">Vous avez désormais un accès complet aux vidéos, documents PDF et directs.</p>
+          <hr style="border: 0; border-top: 1px solid #e5e7eb;">
+          <p style="font-size: 11px; color: #6b7280; text-align: center;">Aliou Sow Academy</p>
+        </div>
+      `;
+
+      const mailInfo = await sendEmail({
+        email: req.user.email,
+        subject,
+        html,
+      });
+
       if (mailInfo && mailInfo.previewUrl) {
         previewUrl = mailInfo.previewUrl;
       }
     } catch (err) {
-      console.error("Erreur d'envoi d'e-mail de confirmation d'abonnement :", err);
+      console.error("Erreur d'envoi d'e-mail de paiement :", err.message);
       emailStatus = 'failed';
     }
 
@@ -103,7 +84,7 @@ const createSubscription = async (req, res) => {
   }
 };
 
-// @desc    S'inscrire instantanément à un cours gratuit (offre promotionnelle), sans paiement
+// @desc    Inscrire l'étudiant connecté gratuitement à un cours en promotion
 // @route   POST /api/subscriptions/enroll-free/:courseId
 // @access  Private/Student
 const enrollFreeCourse = async (req, res) => {
@@ -113,10 +94,7 @@ const enrollFreeCourse = async (req, res) => {
       return res.status(404).json({ message: 'Cours non trouvé' });
     }
 
-    // Filet de sécurité : un cours à 0 FCFA est traité comme gratuit même si la case
-    // "Cours gratuit" n'a pas été explicitement cochée à sa création.
-    const courseIsFree = course.isFree || course.price === 0;
-    if (!courseIsFree) {
+    if (!course.isFree && course.price > 0) {
       return res.status(400).json({ message: "Ce cours n'est pas proposé gratuitement" });
     }
 
@@ -132,7 +110,7 @@ const enrollFreeCourse = async (req, res) => {
     }
 
     const expiresAt = new Date();
-    expiresAt.setMonth(expiresAt.getMonth() + 12); // Même durée d'accès qu'un abonnement payant : 1 an
+    expiresAt.setMonth(expiresAt.getMonth() + 12);
 
     const subscription = await Subscription.create({
       student: req.user._id,
@@ -144,7 +122,6 @@ const enrollFreeCourse = async (req, res) => {
       status: 'active',
     });
 
-    // E-mail de confirmation (best-effort, ne bloque pas la réponse en cas d'échec)
     try {
       const subject = `Accès activé - Cours gratuit : ${course.title}`;
       const html = `
@@ -152,7 +129,6 @@ const enrollFreeCourse = async (req, res) => {
           <h2 style="color: #6366f1; text-align: center;">Accès activé !</h2>
           <p>Bonjour <strong>${req.user.name}</strong>,</p>
           <p>Vous avez maintenant accès gratuitement au cours <strong>${course.title}</strong> (${course.subject} - ${course.level}).</p>
-          <p>Profitez-en pour explorer tous les chapitres, vidéos et documents disponibles.</p>
         </div>
       `;
       await sendEmail({ email: req.user.email, subject, html });
@@ -174,7 +150,7 @@ const getMySubscriptions = async (req, res) => {
     const subscriptions = await Subscription.find({ student: req.user._id })
       .populate({
         path: 'course',
-        populate: { path: 'teacher', select: 'name email avatar' }
+        populate: { path: 'teacher', select: 'name email avatar' },
       });
     res.json(subscriptions);
   } catch (error) {
@@ -200,19 +176,119 @@ const checkSubscriptionStatus = async (req, res) => {
   }
 };
 
-// @desc    Obtenir tous les étudiants inscrits (Enseignant uniquement)
+// @desc    Obtenir tous les étudiants inscrits (Enseignant / Admin)
 // @route   GET /api/subscriptions/teacher/students
-// @access  Private/Teacher
+// @access  Private/Teacher|Admin
 const getTeacherStudents = async (req, res) => {
   try {
-    const courses = req.user.role === 'admin' ? await Course.find() : await Course.find({ teacher: req.user._id });
-    const courseIds = courses.map(c => c._id);
+    const courses = req.user.role === 'admin'
+      ? await Course.find()
+      : await Course.find({ teacher: req.user._id });
+    const courseIds = courses.map((c) => c._id);
 
     const subscriptions = await Subscription.find({ course: { $in: courseIds } })
-      .populate('student', 'name email avatar bio')
-      .populate('course', 'title subject level');
+      .populate('student', 'name email avatar bio phone isActive')
+      .populate('course', 'title subject level chapters')
+      .sort({ createdAt: -1 });
 
     res.json(subscriptions);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Bloquer ou débloquer l'accès d'un élève à un cours
+// @route   PUT /api/subscriptions/:id/status
+// @access  Private/Teacher|Admin
+const toggleSubscriptionStatus = async (req, res) => {
+  try {
+    const subscription = await Subscription.findById(req.params.id).populate('course', 'teacher title');
+    if (!subscription) {
+      return res.status(404).json({ message: 'Abonnement non trouvé' });
+    }
+
+    const isOwner =
+      req.user.role === 'admin' ||
+      (subscription.course && subscription.course.teacher.toString() === req.user._id.toString());
+
+    if (!isOwner) {
+      return res.status(403).json({ message: 'Non autorisé' });
+    }
+
+    const nextStatus = req.body.status
+      ? req.body.status
+      : subscription.status === 'active'
+      ? 'suspended'
+      : 'active';
+
+    if (!['active', 'suspended', 'expired'].includes(nextStatus)) {
+      return res.status(400).json({ message: 'Statut invalide' });
+    }
+
+    subscription.status = nextStatus;
+    await subscription.save();
+    await subscription.populate('student', 'name email avatar bio phone isActive');
+    await subscription.populate('course', 'title subject level chapters');
+
+    res.json(subscription);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Relancer un élève par e-mail pour un cours
+// @route   POST /api/subscriptions/:id/remind
+// @access  Private/Teacher|Admin
+const remindStudent = async (req, res) => {
+  try {
+    const subscription = await Subscription.findById(req.params.id)
+      .populate('student', 'name email')
+      .populate('course', 'title teacher');
+
+    if (!subscription) {
+      return res.status(404).json({ message: 'Abonnement non trouvé' });
+    }
+
+    const isOwner =
+      req.user.role === 'admin' ||
+      (subscription.course && subscription.course.teacher.toString() === req.user._id.toString());
+
+    if (!isOwner) {
+      return res.status(403).json({ message: 'Non autorisé' });
+    }
+
+    const studentEmail = subscription.student?.email;
+    const studentName = subscription.student?.name || 'Élève';
+    const courseTitle = subscription.course?.title || 'votre cours';
+
+    if (!studentEmail) {
+      return res.status(400).json({ message: "Cet élève n'a pas d'adresse e-mail enregistrée." });
+    }
+
+    const customMsg = (req.body.message || '').trim() ||
+      `Votre professeur vous invite à poursuivre vos leçons et exercices sur "${courseTitle}".`;
+
+    let previewUrl = '';
+    try {
+      const info = await sendEmail({
+        email: studentEmail,
+        subject: `Message de votre professeur — ${courseTitle}`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;border:1px solid #009688;border-radius:10px;">
+          <h2 style="color:#009688;">Aliou Sow Academy</h2>
+          <p>Bonjour <strong>${studentName}</strong>,</p>
+          <p>${customMsg}</p>
+          <p style="font-size:12px;color:#64748b;">Module : ${courseTitle}</p>
+        </div>`,
+      });
+      if (info && info.previewUrl) previewUrl = info.previewUrl;
+    } catch (err) {
+      console.error('Erreur relance étudiant :', err.message);
+    }
+
+    res.json({
+      message: `Relance envoyée à ${studentName} (${studentEmail})`,
+      emailPreviewUrl: previewUrl,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -264,5 +340,7 @@ module.exports = {
   getMySubscriptions,
   checkSubscriptionStatus,
   getTeacherStudents,
+  toggleSubscriptionStatus,
+  remindStudent,
   toggleLessonProgress,
 };

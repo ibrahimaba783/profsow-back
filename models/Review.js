@@ -23,6 +23,22 @@ const reviewSchema = new mongoose.Schema(
       default: '',
       maxlength: 1000,
     },
+    teacherReply: {
+      type: String,
+      default: '',
+      maxlength: 1000,
+    },
+    repliedAt: {
+      type: Date,
+    },
+    isReported: {
+      type: Boolean,
+      default: false,
+    },
+    reportReason: {
+      type: String,
+      default: '',
+    },
   },
   {
     timestamps: true,

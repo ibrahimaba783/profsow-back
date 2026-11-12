@@ -183,12 +183,13 @@ const updateUser = async (req, res) => {
     }
 
     if (req.body.isActive !== undefined) {
-      if (isSelf && req.body.isActive === false) {
+      const nextActive = req.body.isActive === true || req.body.isActive === 'true';
+      if (isSelf && nextActive === false) {
         return res.status(400).json({
           message: 'Vous ne pouvez pas désactiver votre propre compte administrateur.',
         });
       }
-      user.isActive = Boolean(req.body.isActive);
+      user.isActive = nextActive;
     }
 
     if (req.body.name !== undefined && req.body.name.trim()) {
@@ -207,6 +208,7 @@ const updateUser = async (req, res) => {
     if (req.body.phone !== undefined) user.phone = String(req.body.phone).trim();
     if (req.body.title !== undefined) user.title = String(req.body.title).trim();
     if (req.body.bio !== undefined) user.bio = String(req.body.bio);
+    if (req.file) user.avatar = req.file.path;
 
     if (req.body.password) {
       if (String(req.body.password).length < 6) {
