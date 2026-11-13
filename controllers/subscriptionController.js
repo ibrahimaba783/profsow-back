@@ -215,17 +215,27 @@ const toggleSubscriptionStatus = async (req, res) => {
       return res.status(403).json({ message: 'Non autorisé' });
     }
 
-    const nextStatus = req.body.status
-      ? req.body.status
-      : subscription.status === 'active'
-      ? 'suspended'
-      : 'active';
+    if (req.body.expiresAt) {
+      subscription.expiresAt = new Date(req.body.expiresAt);
+      subscription.status = 'active';
+    } else if (req.body.extendMonths) {
+      const baseDate = new Date(subscription.expiresAt) > new Date() ? new Date(subscription.expiresAt) : new Date();
+      baseDate.setMonth(baseDate.getMonth() + Number(req.body.extendMonths));
+      subscription.expiresAt = baseDate;
+      subscription.status = 'active';
+    } else {
+      const nextStatus = req.body.status
+        ? req.body.status
+        : subscription.status === 'active'
+        ? 'suspended'
+        : 'active';
 
-    if (!['active', 'suspended', 'expired'].includes(nextStatus)) {
-      return res.status(400).json({ message: 'Statut invalide' });
+      if (!['active', 'suspended', 'expired'].includes(nextStatus)) {
+        return res.status(400).json({ message: 'Statut invalide' });
+      }
+
+      subscription.status = nextStatus;
     }
-
-    subscription.status = nextStatus;
     await subscription.save();
     await subscription.populate('student', 'name email avatar bio phone isActive');
     await subscription.populate('course', 'title subject level chapters');
