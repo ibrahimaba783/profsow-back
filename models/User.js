@@ -35,6 +35,39 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    status: {
+      type: String,
+      enum: ['active', 'suspended', 'blocked'],
+      default: 'active',
+    },
+    suspendedUntil: {
+      type: Date,
+      default: null,
+    },
+    suspensionReason: {
+      type: String,
+      default: '',
+    },
+    failedLoginAttempts: {
+      type: Number,
+      default: 0,
+    },
+    lockUntil: {
+      type: Date,
+      default: null,
+    },
+    lastLoginAt: {
+      type: Date,
+      default: null,
+    },
+    lastLoginIp: {
+      type: String,
+      default: '',
+    },
+    twoFactorEnabled: {
+      type: Boolean,
+      default: false,
+    },
     phone: {
       type: String,
       default: '',

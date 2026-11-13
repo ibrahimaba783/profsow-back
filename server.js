@@ -4,7 +4,8 @@ const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 
 // Charger les variables d'environnement
-dotenv.config();
+const path = require('path');
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 // Connexion à la base de données MongoDB
 connectDB();
@@ -61,6 +62,8 @@ app.use('/api/stats', require('./routes/statsRoutes'));
 app.use('/api/reviews', require('./routes/reviewRoutes'));
 app.use('/api/settings', require('./routes/settingRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
+app.use('/api/reports', require('./routes/reportRoutes'));
+app.use('/api/notifications', require('./routes/notificationRoutes'));
 
 // Route de test
 app.get('/', (req, res) => {

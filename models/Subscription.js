@@ -37,10 +37,24 @@ const subscriptionSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    autoRenew: {
+      type: Boolean,
+      default: false,
+    },
     completedLessons: {
       type: [String],
       default: [],
     },
+    history: [
+      {
+        action: { type: String, required: true },
+        date: { type: Date, default: Date.now },
+        performedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        previousExpiresAt: Date,
+        newExpiresAt: Date,
+        note: String,
+      },
+    ],
   },
   {
     timestamps: true,

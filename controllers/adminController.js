@@ -4,6 +4,11 @@ const Subscription = require('../models/Subscription');
 const QuizResult = require('../models/QuizResult');
 const Review = require('../models/Review');
 const Discussion = require('../models/Discussion');
+const Report = require('../models/Report');
+const SecurityLog = require('../models/SecurityLog');
+const Setting = require('../models/Setting');
+const Notification = require('../models/Notification');
+const { logSecurityEvent } = require('../utils/securityLogger');
 
 const normalizeEmail = (email) => (typeof email === 'string' ? email.trim().toLowerCase() : '');
 
@@ -21,18 +26,25 @@ const getAdminOverview = async (req, res) => {
       quizResultsCount,
       reviewsCount,
       discussionsCount,
+      pendingReportsCount,
+      securityAlertsCount,
     ] = await Promise.all([
-      User.find({}, 'name email role isActive avatar createdAt').sort({ createdAt: -1 }).lean(),
+      User.find({}, 'name email role isActive status avatar createdAt').sort({ createdAt: -1 }).lean(),
       Course.countDocuments(),
       Course.countDocuments({ $or: [{ isFree: true }, { price: 0 }] }),
       Subscription.find()
-        .populate('student', 'name email avatar')
+        .populate('student', 'name email avatar phone')
         .populate('course', 'title subject level price')
         .sort({ createdAt: -1 })
         .lean(),
       QuizResult.countDocuments(),
       Review.countDocuments(),
       Discussion.countDocuments(),
+      Report.countDocuments({ status: 'pending' }),
+      SecurityLog.countDocuments({
+        severity: { $in: ['warning', 'critical'] },
+        createdAt: { $gt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      }),
     ]);
 
     const usersByRole = {
@@ -40,10 +52,16 @@ const getAdminOverview = async (req, res) => {
       teacher: users.filter((u) => u.role === 'teacher').length,
       admin: users.filter((u) => u.role === 'admin').length,
       total: users.length,
+      active: users.filter((u) => u.isActive !== false && u.status !== 'blocked').length,
+      blocked: users.filter((u) => u.isActive === false || u.status === 'blocked').length,
+      suspended: users.filter((u) => u.status === 'suspended').length,
     };
 
     const activeSubscriptions = subscriptions.filter(
       (s) => s.status === 'active' && new Date(s.expiresAt) > now
+    );
+    const expiringSoonSubscriptions = subscriptions.filter(
+      (s) => s.status === 'active' && new Date(s.expiresAt) > now && new Date(s.expiresAt) <= new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     );
 
     const totalRevenue = subscriptions.reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
@@ -52,6 +70,46 @@ const getAdminOverview = async (req, res) => {
       acc[method] = (acc[method] || 0) + (Number(s.amount) || 0);
       return acc;
     }, {});
+
+    // Génération des graphiques des 6 derniers mois (Revenus & Inscriptions)
+    const monthNames = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
+    const monthlyAnalytics = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - i);
+      const y = d.getFullYear();
+      const m = d.getMonth();
+      const monthKey = `${y}-${String(m + 1).padStart(2, '0')}`;
+      monthlyAnalytics.push({
+        monthKey,
+        label: `${monthNames[m]} ${y}`,
+        revenue: 0,
+        subscriptionsCount: 0,
+        registrationsCount: 0,
+      });
+    }
+
+    // Calculer les données mensuelles d'abonnements
+    subscriptions.forEach((s) => {
+      const d = new Date(s.createdAt || s.startDate);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const found = monthlyAnalytics.find((item) => item.monthKey === key);
+      if (found) {
+        found.revenue += Number(s.amount) || 0;
+        found.subscriptionsCount += 1;
+      }
+    });
+
+    // Calculer les inscriptions mensuelles
+    users.forEach((u) => {
+      const d = new Date(u.createdAt);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const found = monthlyAnalytics.find((item) => item.monthKey === key);
+      if (found) {
+        found.registrationsCount += 1;
+      }
+    });
 
     res.json({
       stats: {
@@ -65,13 +123,17 @@ const getAdminOverview = async (req, res) => {
           total: subscriptions.length,
           active: activeSubscriptions.length,
           expired: subscriptions.length - activeSubscriptions.length,
+          expiringSoon: expiringSoonSubscriptions.length,
         },
         totalRevenue,
         revenueByMethod,
         quizResultsCount,
         reviewsCount,
         discussionsCount,
+        pendingReportsCount,
+        securityAlertsCount,
       },
+      monthlyAnalytics,
       recentUsers: users.slice(0, 6),
       recentSubscriptions: subscriptions.slice(0, 8),
     });
@@ -446,17 +508,264 @@ const assignCourseTeacher = async (req, res) => {
   }
 };
 
+// @desc    Obtenir les journaux de sécurité (Audit Logs)
+// @route   GET /api/admin/security/logs
+// @access  Private/Admin
+const getSecurityLogs = async (req, res) => {
+  try {
+    const { severity, event, search } = req.query;
+    const filter = {};
+    if (severity) filter.severity = severity;
+    if (event) filter.event = event;
+    if (search) {
+      filter.$or = [
+        { email: { $regex: search, $options: 'i' } },
+        { message: { $regex: search, $options: 'i' } },
+        { ip: { $regex: search, $options: 'i' } },
+      ];
+    }
+    const logs = await SecurityLog.find(filter)
+      .populate('user', 'name email role avatar')
+      .sort({ createdAt: -1 })
+      .limit(100);
+    res.json(logs);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Suspendre temporairement un utilisateur
+// @route   POST /api/admin/users/:id/suspend
+// @access  Private/Admin
+const suspendUser = async (req, res) => {
+  try {
+    const { days, reason } = req.body;
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    if (user._id.toString() === req.user._id.toString()) {
+      return res.status(400).json({ message: 'Vous ne pouvez pas suspendre votre propre compte.' });
+    }
+
+    const durationDays = Number(days) > 0 ? Number(days) : 7;
+    user.status = 'suspended';
+    user.suspendedUntil = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+    user.suspensionReason = reason || 'Suspension administrative temporaire';
+    await user.save();
+
+    await logSecurityEvent({
+      event: 'user_suspended',
+      user: user._id,
+      email: user.email,
+      severity: 'warning',
+      message: `Utilisateur ${user.email} suspendu pour ${durationDays} jours par ${req.user.email}. Motif : ${user.suspensionReason}`,
+    });
+
+    res.json({ message: `Compte suspendu pour ${durationDays} jours`, user });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Bloquer ou débloquer un compte utilisateur
+// @route   POST /api/admin/users/:id/toggle-block
+// @access  Private/Admin
+const toggleBlockUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    if (user._id.toString() === req.user._id.toString()) {
+      return res.status(400).json({ message: 'Action impossible sur votre propre compte.' });
+    }
+
+    const willBlock = user.isActive !== false && user.status !== 'blocked';
+    user.isActive = !willBlock;
+    user.status = willBlock ? 'blocked' : 'active';
+    if (!willBlock) {
+      user.suspendedUntil = null;
+      user.suspensionReason = '';
+      user.failedLoginAttempts = 0;
+      user.lockUntil = null;
+    }
+    await user.save();
+
+    await logSecurityEvent({
+      event: willBlock ? 'user_blocked' : 'account_unlocked',
+      user: user._id,
+      email: user.email,
+      severity: willBlock ? 'warning' : 'info',
+      message: `Compte ${user.email} ${willBlock ? 'bloqué' : 'débloqué'} par ${req.user.email}`,
+    });
+
+    res.json({ message: willBlock ? 'Utilisateur bloqué' : 'Utilisateur débloqué', user });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Réinitialiser les accès / mot de passe d'un utilisateur
+// @route   POST /api/admin/users/:id/reset-password
+// @access  Private/Admin
+const resetUserPassword = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+
+    const tempPassword = req.body.newPassword || `Pass${Math.random().toString(36).slice(-6)}!26`;
+    user.password = tempPassword;
+    user.lockUntil = null;
+    user.failedLoginAttempts = 0;
+    await user.save();
+
+    await logSecurityEvent({
+      event: 'password_reset_success',
+      user: user._id,
+      email: user.email,
+      severity: 'info',
+      message: `Mot de passe réinitialisé pour ${user.email} par ${req.user.email}`,
+    });
+
+    res.json({ message: 'Mot de passe réinitialisé avec succès', tempPassword });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Consulter l'activité détaillée d'un utilisateur
+// @route   GET /api/admin/users/:id/activity
+// @access  Private/Admin
+const getUserActivity = async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const [user, subs, quizzes, reviews, reports] = await Promise.all([
+      User.findById(userId).select('-password'),
+      Subscription.find({ student: userId }).populate('course', 'title subject price level'),
+      QuizResult.find({ student: userId }).populate('quiz', 'title'),
+      Review.find({ student: userId }).populate('course', 'title'),
+      Report.find({ $or: [{ reporter: userId }, { targetUser: userId }] }),
+    ]);
+
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+
+    res.json({
+      user,
+      subscriptions: subs,
+      quizzes,
+      reviews,
+      reports,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Sauvegarder / Exporter l'intégralité de la base de données (JSON)
+// @route   GET /api/admin/backup
+// @access  Private/Admin
+const exportDatabaseBackup = async (req, res) => {
+  try {
+    const [users, courses, subscriptions, reviews, settings, reports] = await Promise.all([
+      User.find().select('-password -resetPasswordToken -resetPasswordExpire').lean(),
+      Course.find().lean(),
+      Subscription.find().lean(),
+      Review.find().lean(),
+      Setting.find().lean(),
+      Report.find().lean(),
+    ]);
+
+    const backupData = {
+      platform: 'Aliou Sow Academy',
+      version: '2.0',
+      exportedAt: new Date().toISOString(),
+      exportedBy: req.user.email,
+      counts: {
+        users: users.length,
+        courses: courses.length,
+        subscriptions: subscriptions.length,
+        reviews: reviews.length,
+        reports: reports.length,
+      },
+      data: {
+        users,
+        courses,
+        subscriptions,
+        reviews,
+        settings,
+        reports,
+      },
+    };
+
+    await logSecurityEvent({
+      event: 'db_backup',
+      user: req.user._id,
+      severity: 'info',
+      message: `Sauvegarde de la base de données exportée par ${req.user.email}`,
+    });
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="backup-profsow-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.json(backupData);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Lister toutes les discussions récentes pour modération
+// @route   GET /api/admin/discussions
+// @access  Private/Admin
+const getAllDiscussions = async (req, res) => {
+  try {
+    const discussions = await Discussion.find()
+      .populate('sender', 'name email role avatar')
+      .populate('course', 'title subject level')
+      .sort({ createdAt: -1 })
+      .limit(100);
+    res.json(discussions);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Supprimer un message de discussion abusif
+// @route   DELETE /api/admin/discussions/:id
+// @access  Private/Admin
+const deleteDiscussion = async (req, res) => {
+  try {
+    const disc = await Discussion.findById(req.params.id);
+    if (!disc) return res.status(404).json({ message: 'Message introuvable' });
+    await disc.deleteOne();
+
+    await logSecurityEvent({
+      event: 'admin_action',
+      user: req.user._id,
+      severity: 'info',
+      message: `Message de discussion supprimé par ${req.user.email}`,
+    });
+
+    res.json({ message: 'Message de discussion supprimé' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getAdminOverview,
   getAllUsers,
   createUser,
   updateUser,
   deleteUser,
+  suspendUser,
+  toggleBlockUser,
+  resetUserPassword,
+  getUserActivity,
   getAllSubscriptions,
   grantSubscription,
   updateSubscription,
   deleteSubscription,
   getAllReviews,
   deleteReview,
+  getAllDiscussions,
+  deleteDiscussion,
   assignCourseTeacher,
+  getSecurityLogs,
+  exportDatabaseBackup,
 };

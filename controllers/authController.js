@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const sendEmail = require('../utils/sendEmail');
 const { OAuth2Client } = require('google-auth-library');
+const { logSecurityEvent } = require('../utils/securityLogger');
 
 const GOOGLE_CLIENT_ID =
   process.env.GOOGLE_CLIENT_ID ||
@@ -173,6 +174,8 @@ const loginUser = async (req, res) => {
   try {
     const cleanEmail = normalizeEmail(req.body.email);
     const password = typeof req.body.password === 'string' ? req.body.password : '';
+    const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+    const userAgent = req.headers['user-agent'] || '';
 
     if (!cleanEmail || !password) {
       return res.status(400).json({ message: 'Veuillez saisir votre email et votre mot de passe.' });
@@ -180,18 +183,108 @@ const loginUser = async (req, res) => {
 
     const user = await findUserByEmail(cleanEmail, true);
 
+    // Vérifier si le compte est temporairement verrouillé pour force brute
+    if (user && user.lockUntil && user.lockUntil > Date.now()) {
+      const remainingMinutes = Math.ceil((user.lockUntil - Date.now()) / (60 * 1000));
+      await logSecurityEvent({
+        event: 'bruteforce_alert',
+        user,
+        email: cleanEmail,
+        ip,
+        userAgent,
+        severity: 'warning',
+        message: `Tentative de connexion sur un compte verrouillé (${cleanEmail}).`,
+      });
+      return res.status(423).json({
+        message: `Compte temporairement verrouillé pour sécurité. Réessayez dans ${remainingMinutes} minute(s).`,
+      });
+    }
+
+    // Vérifier si le compte est suspendu
+    if (user && user.status === 'suspended' && user.suspendedUntil && user.suspendedUntil > Date.now()) {
+      const untilStr = new Date(user.suspendedUntil).toLocaleDateString('fr-FR');
+      return res.status(403).json({
+        message: `Ce compte est suspendu jusqu'au ${untilStr}. Motif : ${user.suspensionReason || 'Non précisé'}.`,
+      });
+    }
+
     if (user && (await user.matchPassword(password))) {
-      if (user.isActive === false) {
+      if (user.isActive === false || user.status === 'blocked') {
+        await logSecurityEvent({
+          event: 'login_failed',
+          user,
+          email: cleanEmail,
+          ip,
+          userAgent,
+          severity: 'warning',
+          message: `Connexion bloquée sur compte désactivé : ${cleanEmail}`,
+        });
         return res.status(403).json({
-          message: "Ce compte a été désactivé par l'administrateur.",
+          message: "Ce compte a été bloqué par l'administrateur.",
         });
       }
+
+      // Réinitialiser les compteurs d'échecs et enregistrer l'activité
+      user.failedLoginAttempts = 0;
+      user.lockUntil = null;
+      user.lastLoginAt = new Date();
+      user.lastLoginIp = ip;
+      await user.save();
+
+      await logSecurityEvent({
+        event: 'login_success',
+        user,
+        email: cleanEmail,
+        ip,
+        userAgent,
+        severity: 'info',
+        message: `Connexion réussie (${user.role}) : ${cleanEmail}`,
+      });
+
       res.json(
         formatUserResponse(user, {
           token: generateToken(user._id),
         })
       );
     } else {
+      // Gestion des échecs et détection de force brute
+      if (user) {
+        user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+        let isLocked = false;
+        if (user.failedLoginAttempts >= 5) {
+          user.lockUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 min de blocage
+          isLocked = true;
+        }
+        await user.save();
+
+        await logSecurityEvent({
+          event: isLocked ? 'account_locked' : 'login_failed',
+          user,
+          email: cleanEmail,
+          ip,
+          userAgent,
+          severity: isLocked ? 'critical' : 'warning',
+          message: isLocked
+            ? `🚨 Compte verrouillé suite à 5 tentatives infructueuses : ${cleanEmail}`
+            : `Échec de connexion (${user.failedLoginAttempts}/5) : ${cleanEmail}`,
+        });
+
+        if (isLocked) {
+          return res.status(423).json({
+            message: 'Trop de tentatives échouées. Compte verrouillé pendant 15 minutes pour votre sécurité.',
+          });
+        }
+      } else {
+        await logSecurityEvent({
+          event: 'login_failed',
+          email: cleanEmail,
+          ip,
+          userAgent,
+          severity: 'info',
+          message: `Tentative de connexion avec email inexistant : ${cleanEmail}`,
+        });
+      }
+
       res.status(401).json({ message: 'Email ou mot de passe incorrect' });
     }
   } catch (error) {
