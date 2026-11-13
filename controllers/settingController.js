@@ -73,7 +73,7 @@ const defaultSettings = {
     {
       question: "Y a-t-il un support disponible si j'ai des questions ?",
       answer:
-        "Oui ! Chaque module intègre un salon de discussion et de soutien pédagogique permettant d'échanger directement avec M. Aliou Sow et les autres apprenants, en plus des séances en direct.",
+        "Oui ! Chaque module intègre un salon de discussion et de soutien pédagogique permettant d'échanger directement avec M. Aliou Sow et les autres élèves, en plus des séances en direct.",
     },
   ],
   testimonials: [
