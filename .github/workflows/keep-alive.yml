@@ -1,0 +1,16 @@
+name: Keep Render Backend Alive
+
+on:
+  schedule:
+    # Exécuté toutes les 10 minutes pour empêcher le Free Tier de Render de s'endormir
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render API
+        run: |
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" https://profsow-back.onrender.com/api/health)
+          echo "$RESPONSE"

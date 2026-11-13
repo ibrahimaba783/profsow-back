@@ -10,12 +10,29 @@ const canManageCourse = (course, user) => {
   return user.role === 'teacher' && course.teacher.toString() === user._id.toString();
 };
 
+// Cache mémoire pour accélérer drastiquement les requêtes publiques GET /api/courses
+let publicCoursesCache = null;
+let publicCoursesCacheTime = 0;
+const CACHE_TTL_MS = 45 * 1000; // 45 secondes
+
+const invalidateCourseCache = () => {
+  publicCoursesCache = null;
+  publicCoursesCacheTime = 0;
+};
+
 // @desc    Obtenir tous les cours
 // @route   GET /api/courses
 // @access  Public (filtre automatiquement les brouillons pour le public / élèves)
 const getCourses = async (req, res) => {
   try {
     const { subject, level } = req.query;
+    const isPublicStudent = !req.user || req.user.role === 'student';
+    const isDefaultQuery = isPublicStudent && !subject && !level;
+
+    if (isDefaultQuery && publicCoursesCache && Date.now() - publicCoursesCacheTime < CACHE_TTL_MS) {
+      return res.json(publicCoursesCache);
+    }
+
     const query = {};
     if (subject) query.subject = subject;
     if (level) query.level = level;
@@ -39,6 +56,12 @@ const getCourses = async (req, res) => {
       studentsCount: countMap.get(c._id.toString()) || 0,
       chaptersCount: c.chapters?.length || 0,
     }));
+
+    if (isDefaultQuery) {
+      publicCoursesCache = enriched;
+      publicCoursesCacheTime = Date.now();
+    }
+
     return res.json(enriched);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -157,6 +180,7 @@ const createCourse = async (req, res) => {
     }
 
     const course = await Course.create(courseData);
+    invalidateCourseCache();
     const populated = await Course.findById(course._id).populate('teacher', 'name email avatar bio');
     res.status(201).json(populated);
   } catch (error) {
@@ -213,6 +237,7 @@ const updateCourse = async (req, res) => {
     }
 
     const updatedCourse = await course.save();
+    invalidateCourseCache();
     const populated = await Course.findById(updatedCourse._id).populate('teacher', 'name email avatar bio');
     res.json(populated);
   } catch (error) {
@@ -248,6 +273,7 @@ const deleteCourse = async (req, res) => {
     }
 
     await course.deleteOne();
+    invalidateCourseCache();
     res.json({ message: 'Cours supprimé avec succès' });
   } catch (error) {
     res.status(500).json({ message: error.message });

@@ -80,4 +80,26 @@ const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
   console.log(`Le serveur écoute sur le port ${PORT} en mode développement.`);
+
+  // Auto-ping périodique pour empêcher Render Free Tier de s'endormir (inactivité > 15 min)
+  const RENDER_URL = (process.env.RENDER_EXTERNAL_URL || 'https://profsow-back.onrender.com').replace(/\/+$/, '');
+  const PING_INTERVAL_MS = 10 * 60 * 1000; // toutes les 10 minutes
+
+  const pingServer = async () => {
+    try {
+      const res = await fetch(`${RENDER_URL}/api/health`, {
+        headers: { 'User-Agent': 'Profsow-KeepAlive/1.0' },
+      });
+      if (res.ok) {
+        console.log(`[Keep-Alive] Ping réussi vers ${RENDER_URL}/api/health (${new Date().toLocaleTimeString('fr-FR')})`);
+      }
+    } catch (err) {
+      console.warn(`[Keep-Alive] Ping notification : ${err.message}`);
+    }
+  };
+
+  if (process.env.NODE_ENV === 'production' || process.env.RENDER_EXTERNAL_URL || process.env.ENABLE_KEEP_ALIVE === 'true') {
+    setTimeout(pingServer, 20000);
+    setInterval(pingServer, PING_INTERVAL_MS);
+  }
 });
