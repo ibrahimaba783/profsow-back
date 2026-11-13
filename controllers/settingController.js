@@ -32,6 +32,8 @@ const defaultSettings = {
     enableReviews: true,
     enablePdfDownload: true,
     enableShareButtons: true,
+    enableSequentialUnlock: true,
+    enableAppInstall: true,
   },
   announcement: {
     active: false,

@@ -52,6 +52,7 @@ const settingSchema = new mongoose.Schema(
       enablePdfDownload: { type: Boolean, default: true },
       enableShareButtons: { type: Boolean, default: true },
       enableSequentialUnlock: { type: Boolean, default: true },
+      enableAppInstall: { type: Boolean, default: true },
     },
     announcement: {
       active: { type: Boolean, default: false },
