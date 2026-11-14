@@ -1,33 +1,25 @@
 const User = require('../models/User');
 const Course = require('../models/Course');
 
-let cachedStats = null;
-let cachedStatsTime = 0;
-const STATS_TTL_MS = 60 * 1000; // 60 secondes
-
-// @desc    Obtenir les statistiques publiques réelles de la plateforme
+// @desc    Obtenir les statistiques publiques réelles de la plateforme (100% synchronisées avec MongoDB)
 // @route   GET /api/stats
 // @access  Public
 const getPublicStats = async (req, res) => {
   try {
-    if (cachedStats && Date.now() - cachedStatsTime < STATS_TTL_MS) {
-      return res.json(cachedStats);
-    }
-
-    const [studentsCount, coursesCount, subjects] = await Promise.all([
+    const [studentsCount, courses, subjects] = await Promise.all([
       User.countDocuments({ role: 'student' }),
-      Course.countDocuments(),
+      Course.find({}, 'chapters').lean(),
       Course.distinct('subject'),
     ]);
 
-    const result = {
-      studentsCount,
-      coursesCount,
-      modulesCount: subjects.length, // nombre de matières réellement proposées (Maths / Physique-Chimie)
-    };
+    const totalChapters = courses.reduce((acc, c) => acc + (c.chapters?.length || 0), 0);
+    const coursesAndChapters = courses.length + totalChapters;
 
-    cachedStats = result;
-    cachedStatsTime = Date.now();
+    const result = {
+      studentsCount: studentsCount || 0,
+      coursesCount: coursesAndChapters,
+      modulesCount: subjects.length,
+    };
 
     res.json(result);
   } catch (error) {
