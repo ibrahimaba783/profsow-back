@@ -15,6 +15,8 @@ const {
   deleteLesson,
   addCourseAnnouncement,
   deleteCourseAnnouncement,
+  getLessonContent,
+  enrollCourse,
 } = require('../controllers/courseController');
 const { protect, optionalAuth, authorize } = require('../middleware/authMiddleware');
 const { uploadImage, uploadPdf } = require('../utils/cloudinary');
@@ -27,6 +29,9 @@ router.route('/:id')
   .get(optionalAuth, getCourseById)
   .put(protect, authorize('teacher', 'admin'), uploadImage.single('image'), updateCourse)
   .delete(protect, authorize('teacher', 'admin'), deleteCourse);
+
+router.route('/:id/enroll')
+  .post(protect, enrollCourse);
 
 router.route('/:id/announcements')
   .post(protect, authorize('teacher', 'admin'), addCourseAnnouncement);
@@ -48,6 +53,7 @@ router.route('/:id/chapters/:chapterId/lessons')
   .post(protect, authorize('teacher', 'admin'), uploadPdf.single('pdf'), addLesson);
 
 router.route('/:id/chapters/:chapterId/lessons/:lessonId')
+  .get(optionalAuth, getLessonContent)
   .put(protect, authorize('teacher', 'admin'), uploadPdf.single('pdf'), updateLesson)
   .delete(protect, authorize('teacher', 'admin'), deleteLesson);
 

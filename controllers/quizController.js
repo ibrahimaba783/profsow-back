@@ -1,6 +1,7 @@
 const Quiz = require('../models/Quiz');
 const QuizResult = require('../models/QuizResult');
 const Course = require('../models/Course');
+const Subscription = require('../models/Subscription');
 
 const canManageCourse = (course, user) =>
   user.role === 'admin' || (course && course.teacher.toString() === user._id.toString());

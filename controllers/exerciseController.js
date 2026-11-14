@@ -348,7 +348,7 @@ const submitExerciseWork = async (req, res) => {
     const course = await Course.findById(exercise.course);
     const isStaff = canManageCourse(course, req.user);
 
-    if (!isStaff && exercise.subscribersOnly !== false) {
+    if (!isStaff) {
       const activeSub = await Subscription.findOne({
         student: req.user._id,
         course: exercise.course,
@@ -453,6 +453,78 @@ const gradeExerciseSubmission = async (req, res) => {
   }
 };
 
+// @desc    Obtenir un exercice par son ID
+// @route   GET /api/exercises/:id
+// @access  Private (inscription au cours requise)
+const getExerciseById = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentification requise' });
+    }
+
+    const exercise = await Exercise.findById(req.params.id);
+    if (!exercise) return res.status(404).json({ message: 'Exercice non trouvé' });
+
+    const course = await Course.findById(exercise.course);
+    if (!course) return res.status(404).json({ message: 'Cours non trouvé' });
+
+    const isStaff = canManageCourse(course, req.user);
+    if (!isStaff) {
+      const activeSub = await Subscription.findOne({
+        student: req.user._id,
+        course: course._id,
+        status: 'active',
+        expiresAt: { $gt: new Date() },
+      });
+      if (!activeSub) {
+        return res.status(403).json({ message: 'Accès réservé aux élèves inscrits à ce cours' });
+      }
+    }
+
+    res.json(exercise);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Obtenir la correction d'un exercice
+// @route   GET /api/exercises/:id/correction
+// @access  Private (inscription au cours requise)
+const getExerciseCorrection = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentification requise' });
+    }
+
+    const exercise = await Exercise.findById(req.params.id);
+    if (!exercise) return res.status(404).json({ message: 'Exercice non trouvé' });
+
+    const course = await Course.findById(exercise.course);
+    if (!course) return res.status(404).json({ message: 'Cours non trouvé' });
+
+    const isStaff = canManageCourse(course, req.user);
+    if (!isStaff) {
+      const activeSub = await Subscription.findOne({
+        student: req.user._id,
+        course: course._id,
+        status: 'active',
+        expiresAt: { $gt: new Date() },
+      });
+      if (!activeSub) {
+        return res.status(403).json({ message: 'Accès réservé aux élèves inscrits à ce cours' });
+      }
+    }
+
+    res.json({
+      correctionText: exercise.correctionText || '',
+      correctionPdf: exercise.correctionPdf || '',
+      correctionVideoUrl: exercise.correctionVideoUrl || '',
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getExercisesByCourse,
   getTeacherExercisesAndSubmissions,
@@ -461,4 +533,6 @@ module.exports = {
   deleteExercise,
   submitExerciseWork,
   gradeExerciseSubmission,
+  getExerciseById,
+  getExerciseCorrection,
 };

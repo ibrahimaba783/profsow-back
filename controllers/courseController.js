@@ -1,13 +1,17 @@
 const Course = require('../models/Course');
 const Subscription = require('../models/Subscription');
+const Setting = require('../models/Setting');
 const User = require('../models/User');
 const { cloudinary } = require('../utils/cloudinary');
 const sendEmail = require('../utils/sendEmail');
 
 const canManageCourse = (course, user) => {
-  if (!user) return false;
+  if (!user || !course) return false;
   if (user.role === 'admin') return true;
-  return user.role === 'teacher' && course.teacher.toString() === user._id.toString();
+  const teacherId = course.teacher?._id
+    ? course.teacher._id.toString()
+    : course.teacher?.toString();
+  return user.role === 'teacher' && teacherId === user._id.toString();
 };
 
 // Cache mémoire pour accélérer drastiquement les requêtes publiques GET /api/courses
@@ -70,7 +74,7 @@ const getCourses = async (req, res) => {
 
 // @desc    Obtenir un cours spécifique par son ID
 // @route   GET /api/courses/:id
-// @access  Public (contenu complet uniquement si admin, prof propriétaire ou élève abonné)
+// @access  Public (infos publiques + titres de chapitres seulement si non inscrit)
 const getCourseById = async (req, res) => {
   try {
     const course = await Course.findById(req.params.id).populate('teacher', 'name email avatar bio');
@@ -90,18 +94,49 @@ const getCourseById = async (req, res) => {
           status: 'active',
           expiresAt: { $gt: new Date() },
         });
-        hasFullAccess = !!activeSub;
+        hasFullAccess = Boolean(activeSub);
       }
     }
 
+    // Élève inscrit ou Enseignant/Admin : accès complet
     if (hasFullAccess) {
-      return res.json(course);
+      const fullDoc = course.toObject();
+      fullDoc.isEnrolled = true;
+      fullDoc.chapters = (fullDoc.chapters || []).map((ch) => ({
+        ...ch,
+        isLocked: false,
+        isFree: true,
+      }));
+      return res.json(fullDoc);
     }
 
+    // Visiteur non connecté OU élève non inscrit :
+    // Réponse PUBLIQUE : infos cours + chapitres (titres seulement), SANS exposer URLs de vidéos, PDF ou quiz
     const [studentsCount, totalCoursesCount] = await Promise.all([
       Subscription.countDocuments({ course: course._id, status: 'active', expiresAt: { $gt: new Date() } }),
       Course.countDocuments({ isPublished: { $ne: false } }),
     ]);
+
+    // Éventuelle leçon d'aperçu gratuite
+    let previewLesson = null;
+    for (const ch of (course.chapters || [])) {
+      for (const les of (ch.lessons || [])) {
+        if (les.isFree || ch.isFree || course.isFree) {
+          previewLesson = {
+            _id: les._id,
+            chapterId: ch._id,
+            chapterTitle: ch.title,
+            title: les.title,
+            contentType: les.contentType,
+            youtubeUrl: les.youtubeUrl || '',
+            content: les.content || '',
+            isFree: true,
+          };
+          break;
+        }
+      }
+      if (previewLesson) break;
+    }
 
     const publicCourse = {
       _id: course._id,
@@ -109,9 +144,9 @@ const getCourseById = async (req, res) => {
       description: course.description,
       subject: course.subject,
       level: course.level,
-      duration: course.duration,
-      price: course.price,
-      isFree: course.isFree,
+      duration: course.duration || '3 mois',
+      price: course.price || 0,
+      isFree: Boolean(course.isFree || course.price === 0),
       isPublished: course.isPublished !== false,
       originalPrice: course.originalPrice,
       image: course.image,
@@ -119,20 +154,29 @@ const getCourseById = async (req, res) => {
       studentsCount,
       totalCoursesCount,
       chaptersCount: course.chapters?.length || 0,
-      lessonsCount: course.chapters?.reduce((acc, c) => acc + (c.lessons?.length || 0), 0) || 0,
-      chapters: (course.chapters || []).map((chapter) => ({
+      lessonsCount: course.chapters?.reduce((acc, ch) => acc + (ch.lessons?.length || 0), 0) || 0,
+      isEnrolled: false,
+      previewLesson,
+      // Chapitres avec liste publique des leçons (titres, type et aperçu)
+      chapters: (course.chapters || []).map((chapter, cIdx) => ({
         _id: chapter._id,
         title: chapter.title,
-        isLocked: Boolean(chapter.isLocked),
-        lessons: (chapter.lessons || []).map((lesson) => ({
-          _id: lesson._id,
-          title: lesson.title,
-          contentType: lesson.contentType,
+        order: chapter.order ?? cIdx,
+        lessonsCount: chapter.lessons?.length || 0,
+        isLocked: !Boolean(chapter.isFree || course.isFree),
+        hasPreview: Boolean((chapter.lessons || []).some((les) => les.isFree || chapter.isFree || course.isFree)),
+        lessons: (chapter.lessons || []).map((les) => ({
+          _id: les._id,
+          title: les.title,
+          contentType: les.contentType,
+          isFree: Boolean(les.isFree || chapter.isFree || course.isFree),
+          duration: les.duration || '',
+          order: les.order,
         })),
       })),
     };
 
-    res.json(publicCourse);
+    return res.json(publicCourse);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -285,7 +329,7 @@ const deleteCourse = async (req, res) => {
 // @access  Private/Teacher|Admin
 const addChapter = async (req, res) => {
   try {
-    const { title, isLocked } = req.body;
+    const { title, isLocked, isFree } = req.body;
     const course = await Course.findById(req.params.id);
 
     if (!course) {
@@ -296,7 +340,16 @@ const addChapter = async (req, res) => {
       return res.status(403).json({ message: 'Non autorisé' });
     }
 
-    course.chapters.push({ title, isLocked: Boolean(isLocked), lessons: [] });
+    // Par défaut, le 1er chapitre d'une matière est gratuit (Freemium)
+    const isFirstChapter = (course.chapters || []).length === 0;
+    const chapterIsFree = isFree !== undefined ? (isFree === true || isFree === 'true') : isFirstChapter;
+
+    course.chapters.push({
+      title,
+      isLocked: Boolean(isLocked),
+      isFree: chapterIsFree,
+      lessons: [],
+    });
     await course.save();
     res.status(201).json(course);
   } catch (error) {
@@ -327,12 +380,12 @@ const reorderChapters = async (req, res) => {
   }
 };
 
-// @desc    Mettre à jour un chapitre (titre, verrouillage, ordre des leçons)
+// @desc    Mettre à jour un chapitre (titre, verrouillage, statut gratuit, ordre des leçons)
 // @route   PUT /api/courses/:id/chapters/:chapterId
 // @access  Private/Teacher|Admin
 const updateChapter = async (req, res) => {
   try {
-    const { title, isLocked, lessonIds } = req.body;
+    const { title, isLocked, isFree, lessonIds } = req.body;
     const course = await Course.findById(req.params.id);
     if (!course) return res.status(404).json({ message: 'Cours non trouvé' });
     if (!canManageCourse(course, req.user)) return res.status(403).json({ message: 'Non autorisé' });
@@ -342,6 +395,7 @@ const updateChapter = async (req, res) => {
 
     if (title !== undefined && String(title).trim()) chapter.title = String(title).trim();
     if (isLocked !== undefined) chapter.isLocked = Boolean(isLocked);
+    if (isFree !== undefined) chapter.isFree = isFree === true || isFree === 'true';
     if (Array.isArray(lessonIds)) {
       const map = new Map(chapter.lessons.map((l) => [l._id.toString(), l]));
       const reordered = lessonIds.map((lid) => map.get(String(lid))).filter(Boolean);
@@ -361,7 +415,7 @@ const updateChapter = async (req, res) => {
 // @access  Private/Teacher|Admin
 const addLesson = async (req, res) => {
   try {
-    const { title, contentType, youtubeUrl, meetLink, content } = req.body;
+    const { title, contentType, youtubeUrl, meetLink, content, isFree } = req.body;
     const course = await Course.findById(req.params.id);
 
     if (!course) {
@@ -383,6 +437,7 @@ const addLesson = async (req, res) => {
       youtubeUrl,
       meetLink,
       content,
+      isFree: isFree === true || isFree === 'true',
     };
 
     if (contentType === 'pdf' && req.file) {
@@ -403,7 +458,7 @@ const addLesson = async (req, res) => {
 // @access  Private/Teacher|Admin
 const updateLesson = async (req, res) => {
   try {
-    const { title, contentType, youtubeUrl, meetLink, content } = req.body;
+    const { title, contentType, youtubeUrl, meetLink, content, isFree } = req.body;
     const course = await Course.findById(req.params.id);
     if (!course) return res.status(404).json({ message: 'Cours non trouvé' });
     if (!canManageCourse(course, req.user)) return res.status(403).json({ message: 'Non autorisé' });
@@ -419,6 +474,7 @@ const updateLesson = async (req, res) => {
     if (youtubeUrl !== undefined) lesson.youtubeUrl = youtubeUrl;
     if (meetLink !== undefined) lesson.meetLink = meetLink;
     if (content !== undefined) lesson.content = content;
+    if (isFree !== undefined) lesson.isFree = isFree === true || isFree === 'true';
 
     if (req.file) {
       if (lesson.pdfPublicId) {
@@ -569,6 +625,118 @@ const deleteCourseAnnouncement = async (req, res) => {
   }
 };
 
+// @desc    Inscrire l'élève connecté au cours (un clic)
+// @route   POST /api/courses/:id/enroll
+// @access  Private/Student
+const enrollCourse = async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id);
+    if (!course) {
+      return res.status(404).json({ message: 'Cours non trouvé' });
+    }
+
+    const globalConfig = await Setting.findOne({ key: 'global_config' });
+    const isFree = course.isFree || course.price === 0;
+    if (isFree) {
+      if (globalConfig?.features?.enableFreeEnrollment === false) {
+        return res.status(403).json({
+          message: "Les inscriptions gratuites sont actuellement suspendues par l'administrateur.",
+        });
+      }
+    } else {
+      if (globalConfig?.features?.enablePayments === false) {
+        return res.status(403).json({
+          message: "Les paiements et inscriptions payantes sont temporairement suspendus par l'administrateur.",
+        });
+      }
+    }
+
+    const existingSub = await Subscription.findOne({
+      student: req.user._id,
+      course: course._id,
+      status: 'active',
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (existingSub) {
+      return res.json({
+        success: true,
+        message: 'Vous êtes déjà inscrit à ce cours',
+        subscription: existingSub,
+      });
+    }
+
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + 12);
+
+    const subscription = await Subscription.create({
+      student: req.user._id,
+      course: course._id,
+      paymentMethod: course.price > 0 ? 'Inscription directe' : 'Gratuit',
+      transactionId: `ENROLL-${Date.now()}`,
+      amount: course.price || 0,
+      expiresAt,
+      status: 'active',
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Inscription au cours réussie !',
+      subscription,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Obtenir le contenu d'une leçon (vérification token JWT valide + inscription au cours sauf si leçon d'aperçu gratuit)
+// @route   GET /api/courses/:id/chapters/:chapterId/lessons/:lessonId
+// @access  Public si gratuit/aperçu, sinon Private (401 si non connecté, 403 si non inscrit)
+const getLessonContent = async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id);
+    if (!course) return res.status(404).json({ message: 'Cours non trouvé' });
+
+    const chapterIndex = (course.chapters || []).findIndex(
+      (ch) => String(ch._id) === String(req.params.chapterId)
+    );
+    if (chapterIndex === -1) {
+      return res.status(404).json({ message: 'Chapitre non trouvé' });
+    }
+    const chapter = course.chapters[chapterIndex];
+    const lesson = chapter.lessons.id(req.params.lessonId);
+    if (!lesson) {
+      return res.status(404).json({ message: 'Leçon non trouvée' });
+    }
+
+    const isContentFree = Boolean(lesson.isFree || chapter.isFree || course.isFree);
+    const isStaff = req.user ? canManageCourse(course, req.user) : false;
+
+    if (!isStaff && !isContentFree) {
+      if (!req.user) {
+        return res.status(401).json({ message: 'Authentification requise pour accéder à cette leçon' });
+      }
+      const activeSub = await Subscription.findOne({
+        student: req.user._id,
+        course: course._id,
+        status: 'active',
+        expiresAt: { $gt: new Date() },
+      });
+      if (!activeSub) {
+        return res.status(403).json({
+          message: 'Accès réservé. Vous devez être inscrit à ce cours pour accéder aux contenus des leçons.',
+        });
+      }
+    }
+
+    return res.json(lesson);
+
+    return res.json(lesson);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getCourses,
   getCourseById,
@@ -584,4 +752,6 @@ module.exports = {
   deleteLesson,
   addCourseAnnouncement,
   deleteCourseAnnouncement,
+  getLessonContent,
+  enrollCourse,
 };

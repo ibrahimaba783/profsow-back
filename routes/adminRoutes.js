@@ -21,6 +21,8 @@ const {
   assignCourseTeacher,
   getSecurityLogs,
   exportDatabaseBackup,
+  syncSystemCounters,
+  clearSystemCache,
 } = require('../controllers/adminController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const { uploadImage } = require('../utils/cloudinary');
@@ -28,6 +30,10 @@ const { uploadImage } = require('../utils/cloudinary');
 router.use(protect, authorize('admin'));
 
 router.get('/overview', getAdminOverview);
+
+// Outils système & Résolution de problèmes
+router.post('/system/sync-counters', syncSystemCounters);
+router.post('/system/clear-cache', clearSystemCache);
 
 // Sauvegarde complète de la base de données
 router.get('/backup', exportDatabaseBackup);

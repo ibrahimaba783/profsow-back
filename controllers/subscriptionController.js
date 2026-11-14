@@ -1,5 +1,6 @@
 const Subscription = require('../models/Subscription');
 const Course = require('../models/Course');
+const Setting = require('../models/Setting');
 const sendEmail = require('../utils/sendEmail');
 
 // @desc    Créer un nouvel abonnement (Simulation Wave / Orange Money)
@@ -8,6 +9,13 @@ const sendEmail = require('../utils/sendEmail');
 const createSubscription = async (req, res) => {
   try {
     const { courseId, paymentMethod, transactionId, amount, durationMonths } = req.body;
+
+    const globalConfig = await Setting.findOne({ key: 'global_config' });
+    if (globalConfig?.features?.enablePayments === false) {
+      return res.status(403).json({
+        message: "Les paiements Wave & Orange Money sont temporairement suspendus par l'administrateur.",
+      });
+    }
 
     const course = await Course.findById(courseId);
     if (!course) {
@@ -89,6 +97,13 @@ const createSubscription = async (req, res) => {
 // @access  Private/Student
 const enrollFreeCourse = async (req, res) => {
   try {
+    const globalConfig = await Setting.findOne({ key: 'global_config' });
+    if (globalConfig?.features?.enableFreeEnrollment === false) {
+      return res.status(403).json({
+        message: "Les inscriptions gratuites sont actuellement suspendues par l'administrateur.",
+      });
+    }
+
     const course = await Course.findById(req.params.courseId);
     if (!course) {
       return res.status(404).json({ message: 'Cours non trouvé' });

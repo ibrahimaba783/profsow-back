@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const Setting = require('../models/Setting');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const sendEmail = require('../utils/sendEmail');
@@ -94,6 +95,13 @@ const registerUser = async (req, res) => {
 
     if (password.length < 6) {
       return res.status(400).json({ message: 'Le mot de passe doit contenir au moins 6 caractères.' });
+    }
+
+    const globalConfig = await Setting.findOne({ key: 'global_config' });
+    if (globalConfig?.features?.enableOpenRegistration === false) {
+      return res.status(403).json({
+        message: "Les inscriptions publiques sont actuellement suspendues par l'administrateur.",
+      });
     }
 
     const userExists = await findUserByEmail(cleanEmail);

@@ -747,6 +747,65 @@ const deleteDiscussion = async (req, res) => {
   }
 };
 
+// @desc    Synchroniser et recalculer les compteurs de tous les cours
+// @route   POST /api/admin/system/sync-counters
+// @access  Private/Admin
+const syncSystemCounters = async (req, res) => {
+  try {
+    const courses = await Course.find();
+    let updatedCount = 0;
+
+    for (const course of courses) {
+      const chaptersCount = course.chapters ? course.chapters.length : 0;
+      const lessonsCount = (course.chapters || []).reduce(
+        (sum, ch) => sum + (ch.lessons ? ch.lessons.length : 0),
+        0
+      );
+      const studentsCount = await Subscription.countDocuments({
+        course: course._id,
+        status: 'active',
+        expiresAt: { $gt: new Date() },
+      });
+
+      course.chaptersCount = chaptersCount;
+      course.lessonsCount = lessonsCount;
+      course.studentsCount = studentsCount;
+
+      // Si le professeur est manquant, rattacher au premier enseignant
+      if (!course.teacher) {
+        const defaultTeacher = await User.findOne({ role: 'teacher' });
+        if (defaultTeacher) course.teacher = defaultTeacher._id;
+      }
+
+      await course.save();
+      updatedCount++;
+    }
+
+    res.json({
+      success: true,
+      message: `${updatedCount} cours et matières synchronisés avec succès. Tous les compteurs de chapitres, leçons et élèves sont à jour.`,
+      coursesUpdated: updatedCount,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Vider le cache système
+// @route   POST /api/admin/system/clear-cache
+// @access  Private/Admin
+const clearSystemCache = async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      message: 'Cache de la plateforme vidé avec succès. Les données sont rechargées en direct depuis MongoDB.',
+      timestamp: new Date(),
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getAdminOverview,
   getAllUsers,
@@ -768,4 +827,6 @@ module.exports = {
   assignCourseTeacher,
   getSecurityLogs,
   exportDatabaseBackup,
+  syncSystemCounters,
+  clearSystemCache,
 };

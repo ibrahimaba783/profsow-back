@@ -8,6 +8,8 @@ const {
   deleteExercise,
   submitExerciseWork,
   gradeExerciseSubmission,
+  getExerciseById,
+  getExerciseCorrection,
 } = require('../controllers/exerciseController');
 const { protect, optionalAuth, authorize } = require('../middleware/authMiddleware');
 const { uploadExerciseFiles } = require('../utils/cloudinary');
@@ -20,6 +22,8 @@ const exerciseUploadMiddleware = uploadExerciseFiles.fields([
 
 router.get('/teacher/all', protect, authorize('teacher', 'admin'), getTeacherExercisesAndSubmissions);
 router.get('/course/:courseId', optionalAuth, getExercisesByCourse);
+router.get('/:id', protect, getExerciseById);
+router.get('/:id/correction', protect, getExerciseCorrection);
 
 router.post('/', protect, authorize('teacher', 'admin'), exerciseUploadMiddleware, createExercise);
 router.put('/:id', protect, authorize('teacher', 'admin'), exerciseUploadMiddleware, updateExercise);

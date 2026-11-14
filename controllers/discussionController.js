@@ -1,5 +1,6 @@
 const Discussion = require('../models/Discussion');
 const Course = require('../models/Course');
+const Subscription = require('../models/Subscription');
 
 const canModerateCourse = (course, user) =>
   user.role === 'admin' || (course && course.teacher.toString() === user._id.toString());
@@ -9,6 +10,22 @@ const canModerateCourse = (course, user) =>
 // @access  Private
 const getDiscussionByCourse = async (req, res) => {
   try {
+    const course = await Course.findById(req.params.courseId);
+    if (!course) return res.status(404).json({ message: 'Cours non trouvé' });
+
+    const isStaff = canModerateCourse(course, req.user);
+    if (!isStaff) {
+      const activeSub = await Subscription.findOne({
+        student: req.user._id,
+        course: course._id,
+        status: 'active',
+        expiresAt: { $gt: new Date() },
+      });
+      if (!activeSub) {
+        return res.status(403).json({ message: 'Accès réservé. Vous devez être inscrit à ce cours pour voir les échanges.' });
+      }
+    }
+
     const messages = await Discussion.find({ course: req.params.courseId })
       .populate('sender', 'name email role avatar')
       .populate('exercise', 'title')
@@ -26,6 +43,22 @@ const getDiscussionByCourse = async (req, res) => {
 // @access  Private
 const addMessage = async (req, res) => {
   try {
+    const course = await Course.findById(req.params.courseId);
+    if (!course) return res.status(404).json({ message: 'Cours non trouvé' });
+
+    const isStaff = canModerateCourse(course, req.user);
+    if (!isStaff) {
+      const activeSub = await Subscription.findOne({
+        student: req.user._id,
+        course: course._id,
+        status: 'active',
+        expiresAt: { $gt: new Date() },
+      });
+      if (!activeSub) {
+        return res.status(403).json({ message: 'Accès réservé. Vous devez être inscrit à ce cours pour poser une question.' });
+      }
+    }
+
     const { message, exerciseId, exerciseTitle } = req.body;
 
     if (!message || message.trim() === '') {

@@ -11,6 +11,10 @@ const lessonSchema = new mongoose.Schema({
     enum: ['video', 'pdf', 'meet', 'jitsi', 'text'],
     required: [true, 'Veuillez choisir le type de contenu'],
   },
+  isFree: {
+    type: Boolean,
+    default: false,
+  },
   youtubeUrl: {
     type: String,
     default: '',
@@ -39,6 +43,10 @@ const chapterSchema = new mongoose.Schema({
     required: [true, 'Veuillez ajouter un titre au chapitre'],
   },
   isLocked: {
+    type: Boolean,
+    default: false,
+  },
+  isFree: {
     type: Boolean,
     default: false,
   },
