@@ -103,6 +103,31 @@ const settingSchema = new mongoose.Schema(
         active: { type: Boolean, default: true },
       },
     ],
+    rolePermissions: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+    securityRules: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {
+        limitDevices: true,
+        dynamicWatermark: true,
+        antiVideoDownload: true,
+      },
+    },
+    promoCodes: [
+      {
+        code: { type: String, required: true, uppercase: true, trim: true },
+        discountType: { type: String, enum: ['percent', 'fixed'], default: 'percent' },
+        discountValue: { type: Number, required: true, min: 1 },
+        expiresAt: { type: Date },
+        maxUses: { type: Number, default: 0 },
+        usedCount: { type: Number, default: 0 },
+        eligibleLevels: { type: [String], default: ['Tous'] },
+        active: { type: Boolean, default: true },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   {
     timestamps: true,

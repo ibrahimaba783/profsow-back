@@ -140,6 +140,9 @@ const updateSettings = async (req, res) => {
       faqs,
       testimonials,
       extraLinks,
+      rolePermissions,
+      securityRules,
+      promoCodes,
     } = req.body;
 
     if (siteInfo && typeof siteInfo === 'object') {
@@ -215,6 +218,34 @@ const updateSettings = async (req, res) => {
           url: item.url.trim(),
           badge: (item.badge || 'Nouveau').trim(),
           active: item.active !== false,
+        }));
+    }
+
+    if (rolePermissions && typeof rolePermissions === 'object') {
+      settings.rolePermissions = rolePermissions;
+      settings.markModified('rolePermissions');
+    }
+
+    if (securityRules && typeof securityRules === 'object') {
+      settings.securityRules = securityRules;
+      settings.markModified('securityRules');
+    }
+
+    if (Array.isArray(promoCodes)) {
+      settings.promoCodes = promoCodes
+        .filter((item) => item && item.code?.trim())
+        .map((item) => ({
+          code: String(item.code).trim().toUpperCase(),
+          discountType: item.discountType === 'fixed' ? 'fixed' : 'percent',
+          discountValue: Math.max(1, Number(item.discountValue) || 1),
+          expiresAt: item.expiresAt ? new Date(item.expiresAt) : undefined,
+          maxUses: Math.max(0, Number(item.maxUses) || 0),
+          usedCount: Math.max(0, Number(item.usedCount) || 0),
+          eligibleLevels: Array.isArray(item.eligibleLevels) && item.eligibleLevels.length > 0
+            ? item.eligibleLevels
+            : ['Tous'],
+          active: item.active !== false,
+          createdAt: item.createdAt ? new Date(item.createdAt) : new Date(),
         }));
     }
 
