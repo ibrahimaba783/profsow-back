@@ -44,7 +44,7 @@ const defaultSettings = {
   },
   channels: {
     contactPhone: '+221 77 102 33 99',
-    contactEmail: 'Sowaliou2504@gmail.com',
+    contactEmail: 'sowaliou2504@gmail.com',
     whatsappNumber: '+221771023399',
     facebookUrl: '',
     tiktokUrl: 'https://www.tiktok.com/@aliousow9216',
@@ -112,6 +112,9 @@ const getSettings = async (req, res) => {
     let settings = await Setting.findOne({ key: 'global_config' });
     if (!settings) {
       settings = await Setting.create(defaultSettings);
+    } else if (settings.channels?.contactEmail === 'Sowaliou2504@gmail.com') {
+      settings.channels.contactEmail = 'sowaliou2504@gmail.com';
+      await settings.save();
     }
     res.json(settings);
   } catch (error) {
@@ -128,6 +131,9 @@ const updateSettings = async (req, res) => {
     let settings = await Setting.findOne({ key: 'global_config' });
     if (!settings) {
       settings = await Setting.create(defaultSettings);
+    } else if (settings.channels?.contactEmail === 'Sowaliou2504@gmail.com') {
+      settings.channels.contactEmail = 'sowaliou2504@gmail.com';
+      await settings.save();
     }
 
     const {

@@ -70,7 +70,7 @@ const settingSchema = new mongoose.Schema(
     },
     channels: {
       contactPhone: { type: String, default: '+221 77 102 33 99' },
-      contactEmail: { type: String, default: 'Sowaliou2504@gmail.com' },
+      contactEmail: { type: String, default: 'sowaliou2504@gmail.com' },
       whatsappNumber: { type: String, default: '+221771023399' },
       facebookUrl: { type: String, default: '' },
       tiktokUrl: { type: String, default: 'https://www.tiktok.com/@aliousow9216' },
